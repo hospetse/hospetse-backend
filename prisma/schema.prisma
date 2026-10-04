@@ -24,7 +24,7 @@ enum SenderType {
 }
 
 model User {
-  id              String         @id @default(uuid()) @db.Uuid
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email           String         @unique @db.VarChar(255)
   password        String         @db.VarChar(255)
   accountType     AccountType    @map("account_type")
@@ -40,7 +40,7 @@ model User {
 }
 
 model Tutor {
-  id              String         @id @default(uuid()) @db.Uuid
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId          String         @unique @map("user_id") @db.Uuid
   name            String         @db.VarChar(255)
   phone           String?        @db.VarChar(30)
@@ -59,7 +59,7 @@ model Tutor {
 }
 
 model Provider {
-  id              String                 @id @default(uuid()) @db.Uuid
+  id              String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId          String                 @unique @map("user_id") @db.Uuid
   providerType    String                 @map("provider_type") @db.VarChar(30)
   name            String                 @db.VarChar(255)
@@ -90,7 +90,7 @@ model Provider {
 }
 
 model ProviderPhoto {
-  id         String   @id @default(uuid()) @db.Uuid
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   providerId String   @map("provider_id") @db.Uuid
   url        String   @db.VarChar(2048)
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -126,7 +126,7 @@ model PetWalkerDetail {
 }
 
 model Pet {
-  id              String        @id @default(uuid()) @db.Uuid
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tutorId         String        @map("tutor_id") @db.Uuid
   petName         String        @map("pet_name") @db.VarChar(255)
   petSpecies      String        @map("pet_species") @db.VarChar(100)
@@ -144,7 +144,7 @@ model Pet {
 }
 
 model Service {
-  id         String        @id @default(uuid()) @db.Uuid
+  id         String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   providerId String        @map("provider_id") @db.Uuid
   name       String        @db.VarChar(255)
   price      Decimal       @db.Decimal(10, 2)
@@ -157,7 +157,7 @@ model Service {
 }
 
 model ProviderWorkingHours {
-  id        String   @id @default(uuid()) @db.Uuid
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   providerId String  @map("provider_id") @db.Uuid
   dayOfWeek Int      @map("day_of_week") @db.SmallInt
   startTime DateTime @map("start_time") @db.Time(0)
@@ -169,7 +169,7 @@ model ProviderWorkingHours {
 }
 
 model ProviderBlockedDate {
-  id         String   @id @default(uuid()) @db.Uuid
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   providerId String   @map("provider_id") @db.Uuid
   date       DateTime @db.Date
   reason     String?  @db.VarChar(500)
@@ -180,7 +180,7 @@ model ProviderBlockedDate {
 }
 
 model WalkSlot {
-  id           String        @id @default(uuid()) @db.Uuid
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   providerId   String        @map("provider_id") @db.Uuid
   startTime    DateTime      @map("start_time") @db.Time(0)
   endTime      DateTime      @map("end_time") @db.Time(0)
@@ -194,7 +194,7 @@ model WalkSlot {
 }
 
 model Reservation {
-  id          String        @id @default(uuid()) @db.Uuid
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   petId       String        @map("pet_id") @db.Uuid
   tutorId     String        @map("tutor_id") @db.Uuid
   serviceId   String        @map("service_id") @db.Uuid
@@ -223,7 +223,7 @@ model Reservation {
 }
 
 model PetActivityLog {
-  id            String      @id @default(uuid()) @db.Uuid
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   reservationId String      @map("reservation_id") @db.Uuid
   activityType  String      @map("activity_type") @db.VarChar(100)
   description   String?
@@ -236,7 +236,7 @@ model PetActivityLog {
 }
 
 model Review {
-  id            String      @id @default(uuid()) @db.Uuid
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   reservationId String      @unique @map("reservation_id") @db.Uuid
   tutorId       String      @map("tutor_id") @db.Uuid
   providerId    String      @map("provider_id") @db.Uuid
@@ -253,7 +253,7 @@ model Review {
 }
 
 model Favorite {
-  id         String   @id @default(uuid()) @db.Uuid
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tutorId    String   @map("tutor_id") @db.Uuid
   providerId String   @map("provider_id") @db.Uuid
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -266,7 +266,7 @@ model Favorite {
 }
 
 model PaymentMethod {
-  id         String               @id @default(uuid()) @db.Uuid
+  id         String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tutorId    String               @map("tutor_id") @db.Uuid
   type       String               @db.VarChar(20)
   token      String               @db.VarChar(2048)
@@ -280,7 +280,7 @@ model PaymentMethod {
 }
 
 model PaymentTransaction {
-  id              String         @id @default(uuid()) @db.Uuid
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   reservationId   String?        @map("reservation_id") @db.Uuid
   providerId      String?        @map("provider_id") @db.Uuid
   type            String         @db.VarChar(20)
@@ -300,7 +300,7 @@ model PaymentTransaction {
 }
 
 model Coupon {
-  id            String        @id @default(uuid()) @db.Uuid
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   code          String        @unique @db.VarChar(100)
   discountType  String        @map("discount_type") @db.VarChar(20)
   discountValue Decimal       @map("discount_value") @db.Decimal(10, 2)
@@ -314,7 +314,7 @@ model Coupon {
 }
 
 model CouponUsage {
-  id            String      @id @default(uuid()) @db.Uuid
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   couponId      String      @map("coupon_id") @db.Uuid
   reservationId String      @map("reservation_id") @db.Uuid
   tutorId       String      @map("tutor_id") @db.Uuid
@@ -329,7 +329,7 @@ model CouponUsage {
 }
 
 model Conversation {
-  id           String        @id @default(uuid()) @db.Uuid
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tutorId      String        @map("tutor_id") @db.Uuid
   providerId   String        @map("provider_id") @db.Uuid
   reservationId String?      @map("reservation_id") @db.Uuid
@@ -349,7 +349,7 @@ model Conversation {
 }
 
 model Message {
-  id             String       @id @default(uuid()) @db.Uuid
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   conversationId String       @map("conversation_id") @db.Uuid
   senderType     SenderType   @map("sender_type")
   content        String
@@ -361,7 +361,7 @@ model Message {
 }
 
 model ProviderFaq {
-  id         String   @id @default(uuid()) @db.Uuid
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   providerId String   @map("provider_id") @db.Uuid
   question   String
   answer     String
@@ -372,7 +372,7 @@ model ProviderFaq {
 }
 
 model Notification {
-  id        String   @id @default(uuid()) @db.Uuid
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId    String   @map("user_id") @db.Uuid
   type      String   @db.VarChar(100)
   content   String
@@ -385,7 +385,7 @@ model Notification {
 }
 
 model Penalty {
-  id          String   @id @default(uuid()) @db.Uuid
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId      String   @map("user_id") @db.Uuid
   appliedById String   @map("applied_by") @db.Uuid
   type        String   @db.VarChar(20)
