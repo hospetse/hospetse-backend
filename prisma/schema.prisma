@@ -1,0 +1,400 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountType {
+  tutor
+  provider
+  admin
+
+  @@map("account_type_enum")
+}
+
+enum SenderType {
+  tutor
+  host
+  ai
+
+  @@map("sender_type_enum")
+}
+
+model User {
+  id              String         @id @default(uuid()) @db.Uuid
+  email           String         @unique @db.VarChar(255)
+  password        String         @db.VarChar(255)
+  accountType     AccountType    @map("account_type")
+  status          String         @default("pending") @db.VarChar(20)
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  tutor           Tutor?
+  provider        Provider?
+  notifications   Notification[]
+  penalties       Penalty[]      @relation("PenalizedUser")
+  appliedPenalties Penalty[]     @relation("PenaltyAppliedBy")
+
+  @@map("users")
+}
+
+model Tutor {
+  id              String         @id @default(uuid()) @db.Uuid
+  userId          String         @unique @map("user_id") @db.Uuid
+  name            String         @db.VarChar(255)
+  phone           String?        @db.VarChar(30)
+  cpf             String?        @unique @db.VarChar(14)
+  birthDate       DateTime?      @map("birth_date") @db.Date
+  user            User           @relation(fields: [userId], references: [id])
+  pets            Pet[]
+  reservations    Reservation[]
+  reviews         Review[]
+  favorites       Favorite[]
+  paymentMethods  PaymentMethod[]
+  couponUsages    CouponUsage[]
+  conversations   Conversation[]
+
+  @@map("tutors")
+}
+
+model Provider {
+  id              String                 @id @default(uuid()) @db.Uuid
+  userId          String                 @unique @map("user_id") @db.Uuid
+  providerType    String                 @map("provider_type") @db.VarChar(30)
+  name            String                 @db.VarChar(255)
+  cpfCnpj         String?                @unique @map("cpf_cnpj") @db.VarChar(18)
+  location        String?                @db.VarChar(500)
+  rating          Decimal?               @db.Decimal(3, 2)
+  urlPicture      String?                @map("url_picture") @db.VarChar(2048)
+  status          String                 @default("active") @db.VarChar(20)
+  validationStatus String                @default("pending") @map("validation_status") @db.VarChar(20)
+  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  user            User                   @relation(fields: [userId], references: [id])
+  photos          ProviderPhoto[]
+  hotelDetail     HotelDetail?
+  petSitterDetail PetSitterDetail?
+  petWalkerDetail PetWalkerDetail?
+  services        Service[]
+  workingHours    ProviderWorkingHours[]
+  blockedDates    ProviderBlockedDate[]
+  walkSlots       WalkSlot[]
+  reviews         Review[]
+  favorites       Favorite[]
+  transactions    PaymentTransaction[]
+  faqs            ProviderFaq[]
+  conversations   Conversation[]
+
+  @@index([providerType])
+  @@map("providers")
+}
+
+model ProviderPhoto {
+  id         String   @id @default(uuid()) @db.Uuid
+  providerId String   @map("provider_id") @db.Uuid
+  url        String   @db.VarChar(2048)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId])
+  @@map("provider_photos")
+}
+
+model HotelDetail {
+  providerId String   @id @map("provider_id") @db.Uuid
+  capacity   Int?
+  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@map("hotel_details")
+}
+
+model PetSitterDetail {
+  providerId      String   @id @map("provider_id") @db.Uuid
+  homeAttended    Boolean? @map("home_attended")
+  kilometerRadius Decimal? @map("kilometer_radius") @db.Decimal(6, 2)
+  provider        Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@map("pet_sitter_details")
+}
+
+model PetWalkerDetail {
+  providerId   String   @id @map("provider_id") @db.Uuid
+  durationWalk Int?     @map("duration_walk")
+  provider     Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@map("pet_walker_details")
+}
+
+model Pet {
+  id              String        @id @default(uuid()) @db.Uuid
+  tutorId         String        @map("tutor_id") @db.Uuid
+  petName         String        @map("pet_name") @db.VarChar(255)
+  petSpecies      String        @map("pet_species") @db.VarChar(100)
+  petBreed        String?       @map("pet_breed") @db.VarChar(100)
+  petSize         String?       @map("pet_size") @db.VarChar(30)
+  petBirthDate    DateTime?     @map("pet_birth_date") @db.Date
+  medicalNotes    String?       @map("medical_notes")
+  behavioralNotes String?       @map("behavioral_notes")
+  active          Boolean       @default(true)
+  tutor           Tutor         @relation(fields: [tutorId], references: [id])
+  reservations    Reservation[]
+
+  @@index([tutorId])
+  @@map("pets")
+}
+
+model Service {
+  id         String        @id @default(uuid()) @db.Uuid
+  providerId String        @map("provider_id") @db.Uuid
+  name       String        @db.VarChar(255)
+  price      Decimal       @db.Decimal(10, 2)
+  active     Boolean       @default(true)
+  provider   Provider      @relation(fields: [providerId], references: [id])
+  reservations Reservation[]
+
+  @@index([providerId])
+  @@map("services")
+}
+
+model ProviderWorkingHours {
+  id        String   @id @default(uuid()) @db.Uuid
+  providerId String  @map("provider_id") @db.Uuid
+  dayOfWeek Int      @map("day_of_week") @db.SmallInt
+  startTime DateTime @map("start_time") @db.Time(0)
+  endTime   DateTime @map("end_time") @db.Time(0)
+  provider  Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId, dayOfWeek])
+  @@map("provider_working_hours")
+}
+
+model ProviderBlockedDate {
+  id         String   @id @default(uuid()) @db.Uuid
+  providerId String   @map("provider_id") @db.Uuid
+  date       DateTime @db.Date
+  reason     String?  @db.VarChar(500)
+  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, date])
+  @@map("provider_blocked_dates")
+}
+
+model WalkSlot {
+  id           String        @id @default(uuid()) @db.Uuid
+  providerId   String        @map("provider_id") @db.Uuid
+  startTime    DateTime      @map("start_time") @db.Time(0)
+  endTime      DateTime      @map("end_time") @db.Time(0)
+  capacity     Int
+  meetingPoint String?       @map("meeting_point") @db.VarChar(500)
+  provider     Provider      @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  reservations Reservation[]
+
+  @@index([providerId])
+  @@map("walk_slots")
+}
+
+model Reservation {
+  id          String        @id @default(uuid()) @db.Uuid
+  petId       String        @map("pet_id") @db.Uuid
+  tutorId     String        @map("tutor_id") @db.Uuid
+  serviceId   String        @map("service_id") @db.Uuid
+  walkSlotId  String?       @map("walk_slot_id") @db.Uuid
+  status      String        @default("requested") @db.VarChar(20)
+  startDate   DateTime      @map("start_date") @db.Timestamptz(3)
+  endDate     DateTime?     @map("end_date") @db.Timestamptz(3)
+  createdDate DateTime      @default(now()) @map("created_date") @db.Timestamptz(3)
+  totalValue  Decimal       @map("total_value") @db.Decimal(10, 2)
+  pet         Pet           @relation(fields: [petId], references: [id])
+  tutor       Tutor         @relation(fields: [tutorId], references: [id])
+  service     Service       @relation(fields: [serviceId], references: [id])
+  walkSlot    WalkSlot?     @relation(fields: [walkSlotId], references: [id])
+  activityLogs PetActivityLog[]
+  review      Review?
+  transactions PaymentTransaction[]
+  couponUsages CouponUsage[]
+  conversations Conversation[]
+
+  @@index([petId])
+  @@index([tutorId])
+  @@index([serviceId])
+  @@index([walkSlotId])
+  @@index([status, startDate])
+  @@map("reservations")
+}
+
+model PetActivityLog {
+  id            String      @id @default(uuid()) @db.Uuid
+  reservationId String      @map("reservation_id") @db.Uuid
+  activityType  String      @map("activity_type") @db.VarChar(100)
+  description   String?
+  photoUrl      String?     @map("photo_url") @db.VarChar(2048)
+  registeredAt  DateTime    @default(now()) @map("registered_at") @db.Timestamptz(3)
+  reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([reservationId, registeredAt])
+  @@map("pet_activity_logs")
+}
+
+model Review {
+  id            String      @id @default(uuid()) @db.Uuid
+  reservationId String      @unique @map("reservation_id") @db.Uuid
+  tutorId       String      @map("tutor_id") @db.Uuid
+  providerId    String      @map("provider_id") @db.Uuid
+  rating        Int
+  comment       String?
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
+  tutor         Tutor       @relation(fields: [tutorId], references: [id])
+  provider      Provider    @relation(fields: [providerId], references: [id])
+
+  @@index([providerId, createdAt])
+  @@index([tutorId])
+  @@map("reviews")
+}
+
+model Favorite {
+  id         String   @id @default(uuid()) @db.Uuid
+  tutorId    String   @map("tutor_id") @db.Uuid
+  providerId String   @map("provider_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  tutor      Tutor    @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([tutorId, providerId])
+  @@index([providerId])
+  @@map("favorites")
+}
+
+model PaymentMethod {
+  id         String               @id @default(uuid()) @db.Uuid
+  tutorId    String               @map("tutor_id") @db.Uuid
+  type       String               @db.VarChar(20)
+  token      String               @db.VarChar(2048)
+  lastDigits String?              @map("last_digits") @db.VarChar(4)
+  createdAt  DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  tutor      Tutor                @relation(fields: [tutorId], references: [id])
+  transactions PaymentTransaction[]
+
+  @@index([tutorId])
+  @@map("payment_methods")
+}
+
+model PaymentTransaction {
+  id              String         @id @default(uuid()) @db.Uuid
+  reservationId   String?        @map("reservation_id") @db.Uuid
+  providerId      String?        @map("provider_id") @db.Uuid
+  type            String         @db.VarChar(20)
+  status          String         @default("pending") @db.VarChar(20)
+  value           Decimal        @db.Decimal(10, 2)
+  paymentMethodId String?        @map("payment_method_id") @db.Uuid
+  createdDate     DateTime       @default(now()) @map("created_date") @db.Timestamptz(3)
+  reservation     Reservation?   @relation(fields: [reservationId], references: [id])
+  provider        Provider?      @relation(fields: [providerId], references: [id])
+  paymentMethod   PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+
+  @@index([reservationId])
+  @@index([providerId])
+  @@index([paymentMethodId])
+  @@index([type, status])
+  @@map("payment_transactions")
+}
+
+model Coupon {
+  id            String        @id @default(uuid()) @db.Uuid
+  code          String        @unique @db.VarChar(100)
+  discountType  String        @map("discount_type") @db.VarChar(20)
+  discountValue Decimal       @map("discount_value") @db.Decimal(10, 2)
+  maxUses       Int?          @map("max_uses")
+  validFrom     DateTime?     @map("valid_from") @db.Date
+  validUntil    DateTime?     @map("valid_until") @db.Date
+  active        Boolean       @default(true)
+  usages        CouponUsage[]
+
+  @@map("coupons")
+}
+
+model CouponUsage {
+  id            String      @id @default(uuid()) @db.Uuid
+  couponId      String      @map("coupon_id") @db.Uuid
+  reservationId String      @map("reservation_id") @db.Uuid
+  tutorId       String      @map("tutor_id") @db.Uuid
+  usedAt        DateTime    @default(now()) @map("used_at") @db.Timestamptz(3)
+  coupon        Coupon      @relation(fields: [couponId], references: [id])
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
+  tutor         Tutor       @relation(fields: [tutorId], references: [id])
+
+  @@unique([couponId, reservationId])
+  @@index([tutorId])
+  @@map("coupon_usages")
+}
+
+model Conversation {
+  id           String        @id @default(uuid()) @db.Uuid
+  tutorId      String        @map("tutor_id") @db.Uuid
+  providerId   String        @map("provider_id") @db.Uuid
+  reservationId String?      @map("reservation_id") @db.Uuid
+  status       String        @default("ai_handling") @db.VarChar(20)
+  escalatedAt  DateTime?     @map("escalated_at") @db.Timestamptz(3)
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  tutor        Tutor         @relation(fields: [tutorId], references: [id])
+  provider     Provider      @relation(fields: [providerId], references: [id])
+  reservation  Reservation?  @relation(fields: [reservationId], references: [id])
+  messages     Message[]
+
+  @@index([tutorId])
+  @@index([providerId])
+  @@index([reservationId])
+  @@index([status, escalatedAt])
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(uuid()) @db.Uuid
+  conversationId String       @map("conversation_id") @db.Uuid
+  senderType     SenderType   @map("sender_type")
+  content        String
+  sentAt         DateTime     @default(now()) @map("sent_at") @db.Timestamptz(3)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, sentAt])
+  @@map("messages")
+}
+
+model ProviderFaq {
+  id         String   @id @default(uuid()) @db.Uuid
+  providerId String   @map("provider_id") @db.Uuid
+  question   String
+  answer     String
+  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId])
+  @@map("provider_faqs")
+}
+
+model Notification {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  type      String   @db.VarChar(100)
+  content   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read, createdAt])
+  @@map("notifications")
+}
+
+model Penalty {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  appliedById String   @map("applied_by") @db.Uuid
+  type        String   @db.VarChar(20)
+  reason      String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  user        User     @relation("PenalizedUser", fields: [userId], references: [id])
+  appliedBy   User     @relation("PenaltyAppliedBy", fields: [appliedById], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([appliedById])
+  @@map("penalties")
+}
