@@ -30,6 +30,7 @@ Variáveis disponíveis (ver `.env.example` para a lista completa e atualizada):
 | Variável | Descrição | Exemplo |
 | --- | --- | --- |
 | `PORT` | Porta em que o servidor HTTP sobe | `3000` |
+| `DATABASE_URL` | String de conexão do PostgreSQL usada pelo Prisma | `postgresql://postgres:senha@localhost:5432/hospetse?schema=public` |
 
 > O arquivo `.env` nunca deve ser commitado (já está no `.gitignore`). Segredos e configuração de ambiente ficam só localmente ou no painel da plataforma de deploy.
 
@@ -62,6 +63,11 @@ curl http://localhost:3000/health
 ├── app.js              # Define o Express e as rotas (sem subir servidor)
 ├── index.js            # Importa o app e chama .listen() — ponto de entrada real
 ├── eslint.config.js    # Configuração do linter
+├── prisma.config.ts    # Configuração do Prisma CLI (schema, migrações e DATABASE_URL)
+├── tsconfig.json       # Só para o editor resolver os tipos do prisma.config.ts
+├── prisma/
+│   ├── schema.prisma   # Modelo de dados (fonte da verdade do banco)
+│   └── migrations/     # Histórico de migrações SQL versionadas
 ├── test/
 │   └── app.test.js     # Testes automatizados (node:test)
 ├── .env.example        # Modelo das variáveis de ambiente necessárias
@@ -72,7 +78,39 @@ curl http://localhost:3000/health
 
 ## Persistência de dados
 
-> ⚠️ **Pendente de alinhamento com o time.** Hoje o projeto ainda não tem camada de persistência implementada. A decisão de usar **Prisma + PostgreSQL** já está registrada (ADR-002 e ADR-003 na wiki), e a integração está prevista junto com a HSP-PBI-028 (#130). Falta alinhar com o Raul Jorge (revisor técnico) como essa integração encaixa na estrutura atual do back-end antes de implementar.
+O projeto usa **Prisma 6.19.0 + PostgreSQL** (ADR-002 e ADR-003 na wiki). As versões de `prisma` e `@prisma/client` são fixadas e devem ser atualizadas sempre juntas.
+
+### Como a estrutura de migração funciona
+
+- `prisma/schema.prisma` é a fonte da verdade: toda mudança de tabela, coluna, índice ou relação começa aqui.
+- `prisma/migrations/` guarda o histórico em SQL. Cada pasta `<timestamp>_<nome>/migration.sql` é uma migração, aplicada uma única vez e em ordem cronológica.
+- O Prisma registra no banco, na tabela `_prisma_migrations`, quais migrações já foram aplicadas. Por isso **uma migração já aplicada/commitada nunca deve ser editada, renomeada ou apagada**: para corrigir algo, crie uma nova migração.
+- `prisma/migrations/migration_lock.toml` trava o provider (`postgresql`) e não deve ser editado à mão.
+- `prisma.config.ts` diz ao Prisma CLI onde ficam o schema e as migrações e lê a `DATABASE_URL` do `.env`.
+- A migração `20260904100000_init` cria a estrutura inicial completa (extensão `pgcrypto`, enums, tabelas, índices, chaves estrangeiras e constraints `CHECK`). Ela unifica as migrações por domínio que existiam antes de qualquer banco ser migrado.
+
+### Fluxo de trabalho
+
+```bash
+# 1. Primeira vez: aplica todas as migrações no banco local e gera o Prisma Client
+npx prisma migrate dev
+
+# 2. Alterou o schema.prisma? Gere uma nova migração com nome descritivo
+npx prisma migrate dev --name adiciona-campo-x
+
+# 3. Ambientes compartilhados (homologação/produção): só aplica as migrações pendentes
+npx prisma migrate deploy
+
+# Utilitários
+npx prisma validate          # valida o schema.prisma
+npx prisma generate          # regera o Prisma Client
+npx prisma migrate status    # mostra quais migrações estão pendentes no banco
+npx prisma migrate reset     # APAGA o banco local e reaplica tudo (só em desenvolvimento)
+```
+
+> `migrate dev` e `migrate reset` são só para desenvolvimento local: eles podem pedir para recriar o banco. Em ambientes com dados reais use sempre `migrate deploy`.
+
+Sempre revise o `migration.sql` gerado antes de commitar. Se o Prisma gerar comandos que você não esperava (por exemplo `DROP`), o `schema.prisma` provavelmente está divergente do que as migrações anteriores criaram.
 
 ## Testes
 
