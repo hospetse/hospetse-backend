@@ -8,6 +8,7 @@ As decisões de arquitetura do projeto (por que Express, ES Modules, estratégia
 
 - **Node.js 20.6 ou superior** (o projeto usa `process.loadEnvFile`, recurso nativo do Node introduzido nessa versão — ver ADR-009/ADR-010 na wiki).
 - npm (instalado junto com o Node).
+- **Acesso ao banco de desenvolvimento do time** (PostgreSQL hospedado no Railway). Não é preciso instalar PostgreSQL nem Docker na máquina. A `DATABASE_URL` contém usuário e senha, por isso não fica no repositório: peça a um membro do time e coloque-a só no seu `.env`.
 
 ## Instalação
 
@@ -33,6 +34,22 @@ Variáveis disponíveis (ver `.env.example` para a lista completa e atualizada):
 | `DATABASE_URL` | String de conexão do PostgreSQL usada pelo Prisma | `postgresql://postgres:senha@localhost:5432/hospetse?schema=public` |
 
 > O arquivo `.env` nunca deve ser commitado (já está no `.gitignore`). Segredos e configuração de ambiente ficam só localmente ou no painel da plataforma de deploy.
+
+## Primeira execução
+
+Na primeira vez, siga os passos nesta ordem:
+
+1. Instale as dependências (`npm install`, ver [Instalação](#instalação)).
+2. Crie o `.env` a partir do `.env.example` e troque a `DATABASE_URL` de exemplo pela URL do banco de desenvolvimento do Railway (ver [Configuração](#configuração)). Mantenha a linha `PORT`: sem ela o servidor sobe numa porta aleatória.
+3. Gere o Prisma Client (o banco do Railway já tem as tabelas criadas):
+
+   ```bash
+   npx prisma generate
+   ```
+
+4. Suba o servidor e confirme que ele responde (ver [Rodando o projeto](#rodando-o-projeto)).
+
+Sempre que trouxer mudanças da `main` que alterem o `package.json` ou o `schema.prisma`, rode `npm install` e `npx prisma generate` de novo. Sem as dependências instaladas, o `npx prisma` baixa outra versão do Prisma em vez de usar a 6.19.0 do projeto.
 
 ## Rodando o projeto
 
@@ -91,26 +108,38 @@ O projeto usa **Prisma 6.19.0 + PostgreSQL** (ADR-002 e ADR-003 na wiki). As ver
 
 ### Fluxo de trabalho
 
+O banco de desenvolvimento no Railway é **compartilhado por todo o time**. Por isso, ninguém aplica migrações nele a partir da própria máquina: elas só entram no banco depois do merge na `main`, via `npx prisma migrate deploy`.
+
+> **Nunca rode `prisma migrate dev` nem `prisma migrate reset` com a `DATABASE_URL` do Railway.** Se detectarem divergência entre as migrações e o banco, esses comandos oferecem recriar o banco, o que apaga os dados de todo o time.
+
+Para criar uma nova migração depois de alterar o `schema.prisma`:
+
 ```bash
-# 1. Primeira vez: aplica todas as migrações no banco local e gera o Prisma Client
-npx prisma migrate dev
+# 1. Traga a main para a sua branch antes, para comparar com o estado mais recente do banco
+git fetch origin && git merge origin/main
 
-# 2. Alterou o schema.prisma? Gere uma nova migração com nome descritivo
-npx prisma migrate dev --name adiciona-campo-x
+# 2. Crie a pasta da migração (timestamp AAAAMMDDHHMMSS + nome descritivo)
+mkdir prisma/migrations/20261010120000_adiciona-campo-x
 
-# 3. Ambientes compartilhados (homologação/produção): só aplica as migrações pendentes
-npx prisma migrate deploy
+# 3. Gere o SQL comparando o banco do Railway com o seu schema.prisma (só lê o banco, não altera nada)
+npx prisma migrate diff \
+  --from-schema-datasource prisma/schema.prisma \
+  --to-schema-datamodel prisma/schema.prisma \
+  --script > prisma/migrations/20261010120000_adiciona-campo-x/migration.sql
 
-# Utilitários
-npx prisma validate          # valida o schema.prisma
-npx prisma generate          # regera o Prisma Client
-npx prisma migrate status    # mostra quais migrações estão pendentes no banco
-npx prisma migrate reset     # APAGA o banco local e reaplica tudo (só em desenvolvimento)
+# 4. Atualize o Prisma Client local com o novo schema
+npx prisma generate
 ```
 
-> `migrate dev` e `migrate reset` são só para desenvolvimento local: eles podem pedir para recriar o banco. Em ambientes com dados reais use sempre `migrate deploy`.
+Sempre revise o `migration.sql` gerado antes de commitar. Ele deve conter só a sua mudança. Se aparecerem comandos que você não esperava (por exemplo `DROP` de algo que outra pessoa criou), a sua branch está desatualizada em relação à `main` ou o `schema.prisma` diverge do banco.
 
-Sempre revise o `migration.sql` gerado antes de commitar. Se o Prisma gerar comandos que você não esperava (por exemplo `DROP`), o `schema.prisma` provavelmente está divergente do que as migrações anteriores criaram.
+Utilitários:
+
+```bash
+npx prisma validate          # valida o schema.prisma
+npx prisma generate          # regera o Prisma Client
+npx prisma migrate status    # mostra quais migrações ainda não foram aplicadas no banco (só leitura)
+```
 
 ## Testes
 
