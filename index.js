@@ -1,6 +1,6 @@
-import app from './app.js';
-
 process.loadEnvFile('.env');
+const { default: app } = await import('./app.js');
+
 const port = process.env.PORT;
 
 app.listen(port, () => {

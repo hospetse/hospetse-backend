@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test",
+    "test": "node --test test/app.test.js test/health.test.js",
+    "test:integration": "node --test test/integration/db.test.js test/integration/ready.test.js",
+    "smoke:db": "node test/smoke/smoke-db.js",
     "dev": "nodemon index.js",
     "start": "node index.js",
     "lint": "eslint ."
@@ -13,6 +15,9 @@
   "author": "",
   "license": "ISC",
   "type": "module",
+  "engines": {
+    "node": ">=20.12.0"
+  },
   "dependencies": {
     "@prisma/client": "6.19.0",
     "axios": "^1.20.0",
