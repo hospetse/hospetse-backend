@@ -6,7 +6,7 @@ As decisões de arquitetura do projeto (por que Express, ES Modules, estratégia
 
 ## Pré-requisitos
 
-- **Node.js 20.6 ou superior** (o projeto usa `process.loadEnvFile`, recurso nativo do Node introduzido nessa versão — ver ADR-009/ADR-010 na wiki).
+- **Node.js 20.12.0 ou superior** (o projeto usa `process.loadEnvFile`, disponível no Node 21.7.0 e portado para o 20.12.0 — ver ADR-009/ADR-010 na wiki). O mesmo requisito está no campo `engines` do `package.json`.
 - npm (instalado junto com o Node).
 - **Acesso ao banco de desenvolvimento do time** (PostgreSQL hospedado no Railway). Não é preciso instalar PostgreSQL nem Docker na máquina. A `DATABASE_URL` contém usuário e senha, por isso não fica no repositório: peça a um membro do time e coloque-a só no seu `.env`.
 
@@ -31,7 +31,8 @@ Variáveis disponíveis (ver `.env.example` para a lista completa e atualizada):
 | Variável | Descrição | Exemplo |
 | --- | --- | --- |
 | `PORT` | Porta em que o servidor HTTP sobe | `3000` |
-| `DATABASE_URL` | String de conexão do PostgreSQL usada pelo Prisma | `postgresql://postgres:senha@localhost:5432/hospetse?schema=public` |
+| `DATABASE_URL` | String de conexão do PostgreSQL usada pelo Prisma | valor mantido apenas no `.env` |
+| `SMOKE_DATABASE_URL` | Opcional. Substitui a `DATABASE_URL` só no `npm run smoke:db` (para simular falhas) | valor temporário mantido apenas no ambiente |
 
 > O arquivo `.env` nunca deve ser commitado (já está no `.gitignore`). Segredos e configuração de ambiente ficam só localmente ou no painel da plataforma de deploy.
 
@@ -61,8 +62,16 @@ npm start       # produção, sem reload automático
 Depois de subir, confirme que está no ar:
 
 ```bash
-curl http://localhost:3000/health
+curl http://localhost:3000/health        # liveness
+curl http://localhost:3000/health/ready  # readiness (banco)
 ```
+
+| Rota | O que verifica | Respostas |
+| --- | --- | --- |
+| `GET /health` | Liveness: só confirma que o processo responde. Não acessa o banco. | `200 {"status":"Server is running"}` |
+| `GET /health/ready` | Readiness: executa `SELECT 1` no banco com limite de 2 s. Nunca escreve. | `200 {"status":"ready","database":"ok"}` ou `503 {"status":"not_ready","database":"unavailable"}` (falha ou timeout) |
+
+O limite de 2 s do `/health/ready` é aplicado pela corrida da rota e também por `statement_timeout=2000` na URL derivada pelo cliente Prisma. Assim, a resposta HTTP e a consulta pendente no PostgreSQL têm o mesmo limite; a URL original de configuração não é exposta nem alterada no ambiente.
 
 ## Scripts disponíveis
 
@@ -71,14 +80,18 @@ curl http://localhost:3000/health
 | `npm run dev` | Sobe o servidor em modo desenvolvimento (reload automático) |
 | `npm start` | Sobe o servidor em modo produção |
 | `npm run lint` | Roda o ESLint sobre o projeto, apontando problemas de código |
-| `npm test` | Roda a suíte de testes automatizados (test runner nativo do Node) |
+| `npm test` | Roda só os testes sem banco (test runner nativo do Node); não exige `DATABASE_URL` |
+| `npm run test:integration` | Roda os testes de integração contra o banco real (exige `DATABASE_URL`) |
+| `npm run smoke:db` | Smoke check do banco: imprime um relatório JSON e sai com 0 (ok) ou 1 (falha). `npm run smoke:db -- --falha-escrita` simula uma escrita rejeitada |
 
 ## Estrutura do projeto
 
 ```text
 .
-├── app.js              # Define o Express e as rotas (sem subir servidor)
-├── index.js            # Importa o app e chama .listen() — ponto de entrada real
+├── app.js              # Exporta a aplicação Express com Prisma compartilhado (sem subir servidor)
+├── index.js            # Carrega o ambiente e chama .listen() — ponto de entrada real
+├── lib/
+│   └── prisma.js       # Instância única do Prisma Client
 ├── eslint.config.js    # Configuração do linter
 ├── prisma.config.ts    # Configuração do Prisma CLI (schema, migrações e DATABASE_URL)
 ├── tsconfig.json       # Só para o editor resolver os tipos do prisma.config.ts
@@ -86,12 +99,18 @@ curl http://localhost:3000/health
 │   ├── schema.prisma   # Modelo de dados (fonte da verdade do banco)
 │   └── migrations/     # Histórico de migrações SQL versionadas
 ├── test/
-│   └── app.test.js     # Testes automatizados (node:test)
+│   ├── app.test.js     # Testes sem banco (node:test)
+│   ├── health.test.js  # /health sem banco
+│   ├── smoke/
+│   │   └── smoke-db.js # Smoke check do banco (npm run smoke:db)
+│   └── integration/    # Testes contra o banco real (npm run test:integration)
+│       ├── db.test.js
+│       └── ready.test.js
 ├── .env.example        # Modelo das variáveis de ambiente necessárias
 └── package.json
 ```
 
-`app.js` e `index.js` são propositalmente separados: isso permite que os testes importem o `app` sem disparar o efeito colateral de abrir uma porta de rede real (ver ADR-010 na wiki para detalhes).
+`app.js` e `index.js` são propositalmente separados: isso permite que os testes importem o `app` sem disparar o efeito colateral de abrir uma porta de rede real (ver ADR-010 na wiki para detalhes). O `app.js` importa diretamente a instância única do Prisma. O `index.js` carrega o `.env` antes do import dinâmico do app e apenas inicia o servidor. A rota `/health` é liveness e não acessa o banco; `/health/ready` executa `SELECT 1` no banco real, com timeout de 2 segundos.
 
 ## Persistência de dados
 
@@ -148,3 +167,45 @@ npm test
 ```
 
 Os testes usam o test runner nativo do Node (`node:test` + `node:assert`), sem framework externo — decisão registrada na ADR-010. Cada teste sobe o `app` numa porta efêmera (evitando conflito com o servidor de desenvolvimento ou outros testes rodando em paralelo).
+
+Há três grupos:
+
+- `test/*.test.js`: testes somente das rotas `/` e `/health`, sem banco (`npm test`). Não carregam o `.env` nem exigem `DATABASE_URL`.
+- `test/integration/`: testes de readiness e operações contra o banco real (`npm run test:integration`).
+- `test/smoke/smoke-db.js`: smoke check do banco (`npm run smoke:db`).
+
+Os scripts listam os arquivos explicitamente (o `npm` no Windows usa `cmd`, que não expande glob, e `node --test` sem argumentos rodaria também smoke e integração). Ao criar um novo teste sem banco, inclua o arquivo no script `test` do `package.json`.
+
+### Smoke check e validação de banco
+
+Há quatro verificações com responsabilidades diferentes:
+
+- **Smoke check** (`npm run smoke:db`) é uma verificação curta, sequencial e operacional do caminho Prisma + PostgreSQL: configuração, conexão, `SELECT 1`, leitura de `coupons`, escrita com commit, leitura após o commit e limpeza.
+- **Teste de integração** (`npm run test:integration`) exerce o banco real com vários cenários: `SELECT 1`, leitura de `coupons` vazia ou populada, escrita/commit/leitura/remoção, violação de `CHECK`, execuções consecutivas, schema inexistente (`P2021`), banco inacessível (`P1001`) e readiness.
+- **Liveness** (`GET /health`) verifica apenas se o processo HTTP responde; não consulta o banco.
+- **Readiness** (`GET /health/ready`) verifica se a aplicação pode consultar o banco com `SELECT 1`. Responde `200` com `{"status":"ready","database":"ok"}` quando está pronta e `503` com `{"status":"not_ready","database":"unavailable"}` quando a consulta falha ou excede 2 segundos. A rota não escreve dados.
+
+Os comandos disponíveis são:
+
+```text
+npm test
+npm run test:integration
+npm run smoke:db
+npm run smoke:db -- --falha-escrita
+```
+
+`npm test` cobre as rotas sem exigir `DATABASE_URL`. `npm run test:integration` e `npm run smoke:db` exigem uma `DATABASE_URL` configurada no ambiente ou no `.env`; não coloque essa configuração no repositório. A variável `SMOKE_DATABASE_URL` substitui a `DATABASE_URL` somente no smoke e permite simular um banco inacessível ou schema ausente sem alterar o `.env`. Exemplo seguro no PowerShell, usando um valor local temporário:
+
+```powershell
+$env:SMOKE_DATABASE_URL = '<URL-DE-TESTE-INACESSIVEL>'
+npm run smoke:db
+Remove-Item Env:SMOKE_DATABASE_URL
+```
+
+O smoke e os testes de escrita usam somente a tabela `coupons`, escolhida por permitir a criação de um cupom sem fornecer dependências obrigatórias. A estratégia `commit_e_limpeza` insere um registro com `active: false` e `code` único `smoke-...`, confirma o commit, lê fora da transação, exclui apenas pelo `id` criado e verifica a ausência posterior. Registros existentes não são alterados nem apagados. Nenhuma migração, reset ou `db push` foi executado para validar essa implementação.
+
+O relatório do smoke é JSON sanitizado e contém, em termos gerais, data/hora, ambiente, commit, versões do Node/Prisma/PostgreSQL, estratégia, modo, etapas, resultado da limpeza e `codigoSaida`. Cada etapa pode ser `aprovada`, `reprovada` com categoria/código sanitizados ou `nao_executada` por dependência de uma falha anterior. O processo termina com código `0` quando não há etapa reprovada e `1` quando há falha. Os exemplos esperados são: execução normal com `codigoSaida: 0` e limpeza `removido`; `--falha-escrita` com categoria `violacao_constraint` e código `1`; configuração ausente, banco inacessível ou schema ausente com a categoria correspondente e código `1`. Os exemplos são critérios esperados, não resultados novos registrados neste documento.
+
+O limite de readiness é duplo: a rota interrompe a espera após 2 s, e `lib/prisma.js` deriva uma URL do Prisma com `statement_timeout=2000` para limitar a consulta pendente no PostgreSQL. Isso é diferente do liveness, que não depende da conectividade do banco.
+
+Limites conhecidos: a permissão negada (`permissao_negada`) é classificada pelo smoke, mas não é coberta pelos testes porque exigiria um usuário restrito no banco. O relatório não expõe URL, host, porta, usuário, senha, dados pessoais ou mensagens brutas do Prisma/driver.
