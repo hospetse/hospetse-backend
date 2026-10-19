@@ -33,6 +33,7 @@ Variáveis disponíveis (ver `.env.example` para a lista completa e atualizada):
 | `PORT` | Porta em que o servidor HTTP sobe | `3000` |
 | `DATABASE_URL` | String de conexão do PostgreSQL usada pelo Prisma | valor mantido apenas no `.env` |
 | `SMOKE_DATABASE_URL` | Opcional. Substitui a `DATABASE_URL` só no `npm run smoke:db` (para simular falhas) | valor temporário mantido apenas no ambiente |
+| `INTERNAL_SERVICE_TOKEN` | Segredo compartilhado com o Auth Server, exigido na [rota interna de provisionamento](#rota-interna-de-provisionamento-do-user). Mesmo valor nos dois serviços, diferente por ambiente | valor mantido apenas no `.env` |
 
 > O arquivo `.env` nunca deve ser commitado (já está no `.gitignore`). Segredos e configuração de ambiente ficam só localmente ou no painel da plataforma de deploy.
 
@@ -72,6 +73,82 @@ curl http://localhost:3000/health/ready  # readiness (banco)
 | `GET /health/ready` | Readiness: executa `SELECT 1` no banco com limite de 2 s. Nunca escreve. | `200 {"status":"ready","database":"ok"}` ou `503 {"status":"not_ready","database":"unavailable"}` (falha ou timeout) |
 
 O limite de 2 s do `/health/ready` é aplicado pela corrida da rota e também por `statement_timeout=2000` na URL derivada pelo cliente Prisma. Assim, a resposta HTTP e a consulta pendente no PostgreSQL têm o mesmo limite; a URL original de configuração não é exposta nem alterada no ambiente.
+
+## Rota interna de provisionamento do USER
+
+Contrato entre o Auth Server e o back-end para criar o usuário local (Task #259, HSP-PBI-001-TSK-01). Compatível com o `HttpUserProvisioner` do Auth (#253).
+
+### `PUT /api/v1/internal/users/{authUserId}`
+
+Chamada só pelo Auth Server, depois de validar o PIN e criar a `user_auth`. Não é usada pelo front.
+
+`PUT` porque é idempotente: repetir a mesma chamada (por exemplo, após um timeout) não cria um segundo USER.
+
+**`authUserId`:** UUID gerado pelo Auth (`user_auth.id`), enviado no caminho. O back-end guarda esse valor numa coluna própria e única (`users.auth_user_id`), separada do `users.id`, que continua gerado pelo back-end. É o mesmo valor que vai no `sub` do JWT de usuário, usado para localizar o USER nas rotas autenticadas.
+
+**Autenticação:**
+
+```http
+Authorization: Bearer <INTERNAL_SERVICE_TOKEN>
+```
+
+Provisório: segredo compartilhado, comparado em tempo constante. Quando o token de serviço RS256 do Auth (#254) existir, ele substitui o segredo no mesmo cabeçalho, sem mudar a rota nem as respostas. A autenticação é verificada antes de qualquer validação do body.
+
+**Request:**
+
+```json
+{ "email": "tutor@exemplo.com", "name": "Maria Silva" }
+```
+
+| Campo | Regra |
+| --- | --- |
+| `email` | Obrigatório, formato de e-mail, até 255 caracteres. Já confirmado por PIN no Auth. Normalizado com trim e minúsculas, igual ao Auth |
+| `name` | Obrigatório, não pode ser vazio nem só espaços, até 255 caracteres. Gravado sem os espaços das pontas |
+| Outros campos | Recusados com `400`. A senha nunca é enviada ao back-end, e um `password` no body é tratado como erro de integração |
+
+**Respostas:**
+
+| Status | `code` | Caso | Body |
+| --- | --- | --- | --- |
+| `201` | — | USER criado agora | `{ "userId": "uuid", "authUserId": "uuid" }` |
+| `200` | — | USER já existia com o mesmo `authUserId` e e-mail (retentativa) | `{ "userId": "uuid", "authUserId": "uuid" }` |
+| `400` | `VALIDATION_ERROR` | `authUserId` não é UUID, payload inválido ou campo fora do contrato | `{ "code", "message", "details": [{ "field", "message" }] }`, com todos os campos inválidos |
+| `401` | `SERVICE_TOKEN_INVALID` | Cabeçalho ausente, fora do formato `Bearer` ou com token errado | `{ "code", "message" }` |
+| `409` | `EMAIL_ALREADY_IN_USE` | E-mail já usado por outro USER | `{ "code", "message" }` |
+| `409` | `AUTH_USER_ID_CONFLICT` | `authUserId` já vinculado a outro e-mail | `{ "code", "message" }` |
+| `500` | `INTERNAL_ERROR` | Falha inesperada no back-end | `{ "code", "message" }` |
+
+A ordem das verificações é: autenticação (`401`) → validação (`400`) → regra de negócio (`200`/`201`/`409`) → persistência (`500`).
+
+### Requisições repetidas (idempotência)
+
+| `authUserId` já existe? | E-mail | Resposta |
+| --- | --- | --- |
+| Não | Livre | `201`, cria o USER |
+| Sim | Igual ao gravado | `200`, devolve o USER existente sem alterar nada |
+| Sim | Diferente do gravado | `409 AUTH_USER_ID_CONFLICT` |
+| Não | Usado por outro USER | `409 EMAIL_ALREADY_IN_USE` |
+| Duas chamadas iguais ao mesmo tempo | — | A unicidade no banco barra a segunda, que relê o USER e responde `200` |
+
+O `name` não entra na comparação: na retentativa, o nome gravado na primeira criação é mantido. A criação é atômica, então nenhuma falha deixa um USER criado pela metade.
+
+### Falha de comunicação e timeout
+
+O contrato só define se repetir faz sentido. Quantas vezes repetir e quanto esperar ficam a cargo do Auth.
+
+| Resposta | Tipo | Repetir? |
+| --- | --- | --- |
+| `200` / `201` | Sucesso | — |
+| `400`, `401`, `409` | Definitivo | Não: a mesma chamada daria o mesmo erro |
+| `500`, `502`, `503`, `504`, timeout ou sem resposta | Transitório | Sim: repetir é seguro por causa da idempotência |
+
+Se o back-end gravar o USER e a resposta se perder (timeout), a repetição recebe `200` com o mesmo `userId`.
+
+### Pendências
+
+- Onde o nome é gravado (USER ou TUTOR), se o TUTOR é criado no cadastro e o fim do `account_type` dependem da HSP-DEC-002 e são definidos na TSK-02 (#260). O contrato só garante que o nome é recebido e guardado.
+- Formato definitivo do erro padrão (#56). Até lá, vale `{ code, message, details? }`.
+- Troca do `INTERNAL_SERVICE_TOKEN` pelo token de serviço RS256 (#254).
 
 ## Scripts disponíveis
 
