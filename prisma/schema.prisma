@@ -7,9 +7,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Papel na plataforma. Tutor e prestador são deduzidos pelas tabelas tutors/providers (um USER pode ter as duas).
 enum AccountType {
-  tutor
-  provider
+  user
   admin
 
   @@map("account_type_enum")
@@ -25,10 +25,13 @@ enum SenderType {
 
 model User {
   id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  // user_auth.id do Auth Server (outro banco, sem FK). Vai no sub do JWT; o UNIQUE garante a idempotência do provisionamento
+  authUserId      String         @unique @map("auth_user_id") @db.Uuid
   email           String         @unique @db.VarChar(255)
-  password        String         @db.VarChar(255)
-  accountType     AccountType    @map("account_type")
+  name            String         @db.VarChar(255)
+  accountType     AccountType    @default(user) @map("account_type")
   status          String         @default("pending") @db.VarChar(20)
+  profileStatus   String         @default("incomplete") @map("profile_status") @db.VarChar(20)
   createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
   tutor           Tutor?
   provider        Provider?
