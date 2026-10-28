@@ -206,9 +206,9 @@ Rota usada pela tela "Completar perfil" do app (Task #275, HSP-PBI-002-TSK-04). 
 | --- | --- |
 | `cpf` | Com ou sem pontuação. Dígitos verificadores válidos, sem todos os dígitos iguais e sem pertencer a outro usuário. Gravado só com os 11 dígitos |
 | `birthDate` | `YYYY-MM-DD`, data real (`2000-02-30` é recusada) e idade mínima de 18 anos |
-| `phone`, `emergencyContact.phone` | Só dígitos, com DDD: 10 ou 11 dígitos, sem `+55` [assunção] |
+| `phone`, `emergencyContact.phone` | Só dígitos, com DDD: 10 ou 11 dígitos, sem `+55` \[assunção\] |
 | `emergencyContact.name` | Obrigatório, até 255 caracteres |
-| `address.zipCode` | 8 dígitos, com ou sem hífen [assunção]. Gravado sem o hífen |
+| `address.zipCode` | 8 dígitos, com ou sem hífen \[assunção\]. Gravado sem o hífen |
 | `address.street` / `number` | Obrigatórios, até 255 / 20 caracteres |
 | `address.complement` | Opcional, até 100 caracteres |
 | `address.neighborhood` / `city` | Obrigatórios, até 100 caracteres |
@@ -232,7 +232,7 @@ Rota usada pela tela "Completar perfil" do app (Task #275, HSP-PBI-002-TSK-04). 
 
 **Pendências:**
 
-- [assunção] Formato do telefone e do CEP: alinhar com o mobile.
+- \[assunção\] Formato do telefone e do CEP: alinhar com o mobile.
 - Telefone como campo obrigatório do perfil completo: decisão do time, a validar com a PO (a #272 foi removida).
 - Documentação OpenAPI.
 
