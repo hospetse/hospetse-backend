@@ -1,5 +1,5 @@
 process.loadEnvFile('.env');
-const { default: app } = await import('./app.js');
+const { default: app } = await import('./src/app.js');
 
 const port = process.env.PORT;
 

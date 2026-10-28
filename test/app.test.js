@@ -1,7 +1,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert';
 import axios from 'axios';
-import app from "../app.js";
+import app from "../src/app.js";
 const server = app.listen(0);
 const { port } = server.address();
 

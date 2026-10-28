@@ -1,7 +1,7 @@
 import express from 'express';
 import { prisma } from './lib/prisma.js';
 import { requireServiceToken } from './middlewares/service-token.js';
-import { provisionUserController } from './internal-users/internal-users.controller.js';
+import { provisionUserController } from './users/internal-users.controller.js';
 
 // Tempo máximo que /health/ready espera pela verificação do banco.
 export const READY_TIMEOUT_MS = 2000;

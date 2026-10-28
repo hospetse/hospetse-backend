@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import { once } from 'node:events';
 import axios from 'axios';
-import app from '../app.js';
+import app from '../src/app.js';
 
 async function listen() {
     const server = app.listen(0);

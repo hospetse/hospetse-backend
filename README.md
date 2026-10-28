@@ -165,10 +165,12 @@ Se o back-end gravar o USER e a resposta se perder (timeout), a repetição rece
 
 ```text
 .
-├── app.js              # Exporta a aplicação Express com Prisma compartilhado (sem subir servidor)
 ├── index.js            # Carrega o ambiente e chama .listen() — ponto de entrada real
-├── lib/
-│   └── prisma.js       # Instância única do Prisma Client
+├── src/
+│   ├── app.js          # Exporta a aplicação Express e registra as rotas (sem subir servidor)
+│   ├── lib/            # prisma.js (instância única do Prisma Client), app-error.js
+│   ├── middlewares/    # service-token.js (rota interna)
+│   └── users/          # controller e service do provisionamento do USER
 ├── eslint.config.js    # Configuração do linter
 ├── prisma.config.ts    # Configuração do Prisma CLI (schema, migrações e DATABASE_URL)
 ├── tsconfig.json       # Só para o editor resolver os tipos do prisma.config.ts
@@ -283,6 +285,6 @@ O smoke e os testes de escrita usam somente a tabela `coupons`, escolhida por pe
 
 O relatório do smoke é JSON sanitizado e contém, em termos gerais, data/hora, ambiente, commit, versões do Node/Prisma/PostgreSQL, estratégia, modo, etapas, resultado da limpeza e `codigoSaida`. Cada etapa pode ser `aprovada`, `reprovada` com categoria/código sanitizados ou `nao_executada` por dependência de uma falha anterior. O processo termina com código `0` quando não há etapa reprovada e `1` quando há falha. Os exemplos esperados são: execução normal com `codigoSaida: 0` e limpeza `removido`; `--falha-escrita` com categoria `violacao_constraint` e código `1`; configuração ausente, banco inacessível ou schema ausente com a categoria correspondente e código `1`. Os exemplos são critérios esperados, não resultados novos registrados neste documento.
 
-O limite de readiness é duplo: a rota interrompe a espera após 2 s, e `lib/prisma.js` deriva uma URL do Prisma com `statement_timeout=2000` para limitar a consulta pendente no PostgreSQL. Isso é diferente do liveness, que não depende da conectividade do banco.
+O limite de readiness é duplo: a rota interrompe a espera após 2 s, e `src/lib/prisma.js` deriva uma URL do Prisma com `statement_timeout=2000` para limitar a consulta pendente no PostgreSQL. Isso é diferente do liveness, que não depende da conectividade do banco.
 
 Limites conhecidos: a permissão negada (`permissao_negada`) é classificada pelo smoke, mas não é coberta pelos testes porque exigiria um usuário restrito no banco. O relatório não expõe URL, host, porta, usuário, senha, dados pessoais ou mensagens brutas do Prisma/driver.
