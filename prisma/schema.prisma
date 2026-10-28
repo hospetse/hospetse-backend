@@ -24,72 +24,104 @@ enum SenderType {
 }
 
 model User {
-  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   // user_auth.id do Auth Server (outro banco, sem FK). Vai no sub do JWT; o UNIQUE garante a idempotência do provisionamento
-  authUserId      String         @unique @map("auth_user_id") @db.Uuid
-  email           String         @unique @db.VarChar(255)
-  name            String         @db.VarChar(255)
-  accountType     AccountType    @default(user) @map("account_type")
-  status          String         @default("pending") @db.VarChar(20)
-  profileStatus   String         @default("incomplete") @map("profile_status") @db.VarChar(20)
-  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
-  tutor           Tutor?
-  provider        Provider?
-  notifications   Notification[]
-  penalties       Penalty[]      @relation("PenalizedUser")
-  appliedPenalties Penalty[]     @relation("PenaltyAppliedBy")
+  authUserId         String         @unique @map("auth_user_id") @db.Uuid
+  email              String         @unique @db.VarChar(255)
+  name               String         @db.VarChar(255)
+  accountType        AccountType    @default(user) @map("account_type")
+  status             String         @default("pending") @db.VarChar(20)
+  profileStatus      String         @default("incomplete") @map("profile_status") @db.VarChar(20)
+  // Quando o perfil passou para complete (PBI-002)
+  profileCompletedAt DateTime?      @map("profile_completed_at") @db.Timestamptz(3)
+  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  tutor              Tutor?
+  provider           Provider?
+  notifications      Notification[]
+  penalties          Penalty[]      @relation("PenalizedUser")
+  appliedPenalties   Penalty[]      @relation("PenaltyAppliedBy")
+  updatedAt          DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("users")
 }
 
 model Tutor {
-  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId          String         @unique @map("user_id") @db.Uuid
-  name            String         @db.VarChar(255)
-  phone           String?        @db.VarChar(30)
-  cpf             String?        @unique @db.VarChar(14)
-  birthDate       DateTime?      @map("birth_date") @db.Date
-  user            User           @relation(fields: [userId], references: [id])
-  pets            Pet[]
-  reservations    Reservation[]
-  reviews         Review[]
-  favorites       Favorite[]
-  paymentMethods  PaymentMethod[]
-  couponUsages    CouponUsage[]
-  conversations   Conversation[]
+  id                    String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                String          @unique @map("user_id") @db.Uuid
+  name                  String          @db.VarChar(255)
+  phone                 String?         @db.VarChar(30)
+  // Só os 11 dígitos: a máscara fica na exibição, para o UNIQUE não aceitar o mesmo CPF em dois formatos
+  cpf                   String?         @unique @db.VarChar(14)
+  birthDate             DateTime?       @map("birth_date") @db.Date
+  emergencyContactName  String?         @map("emergency_contact_name") @db.VarChar(255)
+  emergencyContactPhone String?         @map("emergency_contact_phone") @db.VarChar(20)
+  addressId             String?         @unique @map("address_id") @db.Uuid
+  user                  User            @relation(fields: [userId], references: [id])
+  address               Address?        @relation(fields: [addressId], references: [id])
+  pets                  Pet[]
+  reservations          Reservation[]
+  reviews               Review[]
+  favorites             Favorite[]
+  paymentMethods        PaymentMethod[]
+  couponUsages          CouponUsage[]
+  conversations         Conversation[]
+  updatedAt             DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("tutors")
 }
 
 model Provider {
-  id              String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId          String                 @unique @map("user_id") @db.Uuid
-  providerType    String                 @map("provider_type") @db.VarChar(30)
-  name            String                 @db.VarChar(255)
-  cpfCnpj         String?                @unique @map("cpf_cnpj") @db.VarChar(18)
-  location        String?                @db.VarChar(500)
-  rating          Decimal?               @db.Decimal(3, 2)
-  urlPicture      String?                @map("url_picture") @db.VarChar(2048)
-  status          String                 @default("active") @db.VarChar(20)
-  validationStatus String                @default("pending") @map("validation_status") @db.VarChar(20)
-  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
-  user            User                   @relation(fields: [userId], references: [id])
-  photos          ProviderPhoto[]
-  hotelDetail     HotelDetail?
-  petSitterDetail PetSitterDetail?
-  petWalkerDetail PetWalkerDetail?
-  services        Service[]
-  workingHours    ProviderWorkingHours[]
-  blockedDates    ProviderBlockedDate[]
-  walkSlots       WalkSlot[]
-  reviews         Review[]
-  favorites       Favorite[]
-  transactions    PaymentTransaction[]
-  faqs            ProviderFaq[]
-  conversations   Conversation[]
+  id               String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String                 @unique @map("user_id") @db.Uuid
+  providerType     String                 @map("provider_type") @db.VarChar(30)
+  name             String                 @db.VarChar(255)
+  cpfCnpj          String?                @unique @map("cpf_cnpj") @db.VarChar(18)
+  addressId        String?                @unique @map("address_id") @db.Uuid
+  rating           Decimal?               @db.Decimal(3, 2)
+  urlPicture       String?                @map("url_picture") @db.VarChar(2048)
+  status           String                 @default("active") @db.VarChar(20)
+  validationStatus String                 @default("pending") @map("validation_status") @db.VarChar(20)
+  createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  user             User                   @relation(fields: [userId], references: [id])
+  address          Address?               @relation(fields: [addressId], references: [id])
+  photos           ProviderPhoto[]
+  hotelDetail      HotelDetail?
+  petSitterDetail  PetSitterDetail?
+  petWalkerDetail  PetWalkerDetail?
+  services         Service[]
+  workingHours     ProviderWorkingHours[]
+  blockedDates     ProviderBlockedDate[]
+  walkSlots        WalkSlot[]
+  reviews          Review[]
+  favorites        Favorite[]
+  transactions     PaymentTransaction[]
+  faqs             ProviderFaq[]
+  conversations    Conversation[]
+  updatedAt        DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([providerType])
   @@map("providers")
+}
+
+// Endereço estruturado, compartilhado por Tutor e prestador (cada um aponta para o seu)
+model Address {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  zipCode      String    @map("zip_code") @db.VarChar(8)
+  street       String    @db.VarChar(255)
+  number       String    @db.VarChar(20)
+  complement   String?   @db.VarChar(100)
+  neighborhood String    @db.VarChar(100)
+  city         String    @db.VarChar(100)
+  state        String    @db.Char(2)
+  // Preenchidos depois, para a busca por proximidade
+  latitude     Decimal?  @db.Decimal(9, 6)
+  longitude    Decimal?  @db.Decimal(9, 6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  tutor        Tutor?
+  provider     Provider?
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("addresses")
 }
 
 model ProviderPhoto {
@@ -107,6 +139,7 @@ model HotelDetail {
   providerId String   @id @map("provider_id") @db.Uuid
   capacity   Int?
   provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("hotel_details")
 }
@@ -116,6 +149,7 @@ model PetSitterDetail {
   homeAttended    Boolean? @map("home_attended")
   kilometerRadius Decimal? @map("kilometer_radius") @db.Decimal(6, 2)
   provider        Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("pet_sitter_details")
 }
@@ -124,6 +158,7 @@ model PetWalkerDetail {
   providerId   String   @id @map("provider_id") @db.Uuid
   durationWalk Int?     @map("duration_walk")
   provider     Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("pet_walker_details")
 }
@@ -141,31 +176,34 @@ model Pet {
   active          Boolean       @default(true)
   tutor           Tutor         @relation(fields: [tutorId], references: [id])
   reservations    Reservation[]
+  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([tutorId])
   @@map("pets")
 }
 
 model Service {
-  id         String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  providerId String        @map("provider_id") @db.Uuid
-  name       String        @db.VarChar(255)
-  price      Decimal       @db.Decimal(10, 2)
-  active     Boolean       @default(true)
-  provider   Provider      @relation(fields: [providerId], references: [id])
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  providerId   String        @map("provider_id") @db.Uuid
+  name         String        @db.VarChar(255)
+  price        Decimal       @db.Decimal(10, 2)
+  active       Boolean       @default(true)
+  provider     Provider      @relation(fields: [providerId], references: [id])
   reservations Reservation[]
+  updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([providerId])
   @@map("services")
 }
 
 model ProviderWorkingHours {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  providerId String  @map("provider_id") @db.Uuid
-  dayOfWeek Int      @map("day_of_week") @db.SmallInt
-  startTime DateTime @map("start_time") @db.Time(0)
-  endTime   DateTime @map("end_time") @db.Time(0)
-  provider  Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  providerId String   @map("provider_id") @db.Uuid
+  dayOfWeek  Int      @map("day_of_week") @db.SmallInt
+  startTime  DateTime @map("start_time") @db.Time(0)
+  endTime    DateTime @map("end_time") @db.Time(0)
+  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([providerId, dayOfWeek])
   @@map("provider_working_hours")
@@ -191,31 +229,33 @@ model WalkSlot {
   meetingPoint String?       @map("meeting_point") @db.VarChar(500)
   provider     Provider      @relation(fields: [providerId], references: [id], onDelete: Cascade)
   reservations Reservation[]
+  updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([providerId])
   @@map("walk_slots")
 }
 
 model Reservation {
-  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  petId       String        @map("pet_id") @db.Uuid
-  tutorId     String        @map("tutor_id") @db.Uuid
-  serviceId   String        @map("service_id") @db.Uuid
-  walkSlotId  String?       @map("walk_slot_id") @db.Uuid
-  status      String        @default("requested") @db.VarChar(20)
-  startDate   DateTime      @map("start_date") @db.Timestamptz(3)
-  endDate     DateTime?     @map("end_date") @db.Timestamptz(3)
-  createdDate DateTime      @default(now()) @map("created_date") @db.Timestamptz(3)
-  totalValue  Decimal       @map("total_value") @db.Decimal(10, 2)
-  pet         Pet           @relation(fields: [petId], references: [id])
-  tutor       Tutor         @relation(fields: [tutorId], references: [id])
-  service     Service       @relation(fields: [serviceId], references: [id])
-  walkSlot    WalkSlot?     @relation(fields: [walkSlotId], references: [id])
-  activityLogs PetActivityLog[]
-  review      Review?
-  transactions PaymentTransaction[]
-  couponUsages CouponUsage[]
+  id            String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  petId         String               @map("pet_id") @db.Uuid
+  tutorId       String               @map("tutor_id") @db.Uuid
+  serviceId     String               @map("service_id") @db.Uuid
+  walkSlotId    String?              @map("walk_slot_id") @db.Uuid
+  status        String               @default("requested") @db.VarChar(20)
+  startDate     DateTime             @map("start_date") @db.Timestamptz(3)
+  endDate       DateTime?            @map("end_date") @db.Timestamptz(3)
+  createdDate   DateTime             @default(now()) @map("created_date") @db.Timestamptz(3)
+  totalValue    Decimal              @map("total_value") @db.Decimal(10, 2)
+  pet           Pet                  @relation(fields: [petId], references: [id])
+  tutor         Tutor                @relation(fields: [tutorId], references: [id])
+  service       Service              @relation(fields: [serviceId], references: [id])
+  walkSlot      WalkSlot?            @relation(fields: [walkSlotId], references: [id])
+  activityLogs  PetActivityLog[]
+  review        Review?
+  transactions  PaymentTransaction[]
+  couponUsages  CouponUsage[]
   conversations Conversation[]
+  updatedAt     DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([petId])
   @@index([tutorId])
@@ -249,6 +289,7 @@ model Review {
   reservation   Reservation @relation(fields: [reservationId], references: [id])
   tutor         Tutor       @relation(fields: [tutorId], references: [id])
   provider      Provider    @relation(fields: [providerId], references: [id])
+  updatedAt     DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([providerId, createdAt])
   @@index([tutorId])
@@ -269,14 +310,15 @@ model Favorite {
 }
 
 model PaymentMethod {
-  id         String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tutorId    String               @map("tutor_id") @db.Uuid
-  type       String               @db.VarChar(20)
-  token      String               @db.VarChar(2048)
-  lastDigits String?              @map("last_digits") @db.VarChar(4)
-  createdAt  DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
-  tutor      Tutor                @relation(fields: [tutorId], references: [id])
+  id           String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tutorId      String               @map("tutor_id") @db.Uuid
+  type         String               @db.VarChar(20)
+  token        String               @db.VarChar(2048)
+  lastDigits   String?              @map("last_digits") @db.VarChar(4)
+  createdAt    DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  tutor        Tutor                @relation(fields: [tutorId], references: [id])
   transactions PaymentTransaction[]
+  updatedAt    DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([tutorId])
   @@map("payment_methods")
@@ -294,6 +336,7 @@ model PaymentTransaction {
   reservation     Reservation?   @relation(fields: [reservationId], references: [id])
   provider        Provider?      @relation(fields: [providerId], references: [id])
   paymentMethod   PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+  updatedAt       DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([reservationId])
   @@index([providerId])
@@ -312,6 +355,7 @@ model Coupon {
   validUntil    DateTime?     @map("valid_until") @db.Date
   active        Boolean       @default(true)
   usages        CouponUsage[]
+  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("coupons")
 }
@@ -332,17 +376,18 @@ model CouponUsage {
 }
 
 model Conversation {
-  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tutorId      String        @map("tutor_id") @db.Uuid
-  providerId   String        @map("provider_id") @db.Uuid
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tutorId       String       @map("tutor_id") @db.Uuid
+  providerId    String       @map("provider_id") @db.Uuid
   reservationId String?      @map("reservation_id") @db.Uuid
-  status       String        @default("ai_handling") @db.VarChar(20)
-  escalatedAt  DateTime?     @map("escalated_at") @db.Timestamptz(3)
-  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  tutor        Tutor         @relation(fields: [tutorId], references: [id])
-  provider     Provider      @relation(fields: [providerId], references: [id])
-  reservation  Reservation?  @relation(fields: [reservationId], references: [id])
-  messages     Message[]
+  status        String       @default("ai_handling") @db.VarChar(20)
+  escalatedAt   DateTime?    @map("escalated_at") @db.Timestamptz(3)
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  tutor         Tutor        @relation(fields: [tutorId], references: [id])
+  provider      Provider     @relation(fields: [providerId], references: [id])
+  reservation   Reservation? @relation(fields: [reservationId], references: [id])
+  messages      Message[]
+  updatedAt     DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([tutorId])
   @@index([providerId])
@@ -369,6 +414,7 @@ model ProviderFaq {
   question   String
   answer     String
   provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([providerId])
   @@map("provider_faqs")
@@ -396,6 +442,7 @@ model Penalty {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   user        User     @relation("PenalizedUser", fields: [userId], references: [id])
   appliedBy   User     @relation("PenaltyAppliedBy", fields: [appliedById], references: [id])
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([userId, createdAt])
   @@index([appliedById])
