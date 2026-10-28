@@ -3,7 +3,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert';
 import { once } from 'node:events';
 import axios from 'axios';
-import { prisma } from '../../lib/prisma.js';
+import { prisma } from '../../src/lib/prisma.js';
 
 try {
     process.loadEnvFile();
@@ -14,7 +14,7 @@ if (!process.env.DATABASE_URL) {
     throw new Error('DATABASE_URL ausente: configure o .env para rodar os testes de integração');
 }
 
-const { default: app } = await import('../../app.js');
+const { default: app } = await import('../../src/app.js');
 // Aquece a conexão antes do teste HTTP para medir a readiness, não o primeiro handshake do Railway.
 await prisma.$connect();
 const http = axios.create({ validateStatus: () => true });
