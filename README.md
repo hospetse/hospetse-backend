@@ -75,6 +75,10 @@ curl http://localhost:3000/health/ready  # readiness (banco)
 
 O limite de 2 s do `/health/ready` é aplicado pela corrida da rota e também por `statement_timeout=2000` na URL derivada pelo cliente Prisma. Assim, a resposta HTTP e a consulta pendente no PostgreSQL têm o mesmo limite; a URL original de configuração não é exposta nem alterada no ambiente.
 
+## Documentação da API
+
+O contrato de todas as rotas está em [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1). As seções abaixo explicam o contexto e as decisões de cada rota. Para validar o arquivo: `npx @redocly/cli lint docs/openapi.yaml`.
+
 ## Rota interna de provisionamento do USER
 
 Contrato entre o Auth Server e o back-end para criar o usuário local (Task #259, HSP-PBI-001-TSK-01). Compatível com o `HttpUserProvisioner` do Auth (#253).
@@ -234,7 +238,6 @@ Rota usada pela tela "Completar perfil" do app (Task #275, HSP-PBI-002-TSK-04). 
 
 - \[assunção\] Formato do telefone e do CEP: alinhar com o mobile.
 - Telefone como campo obrigatório do perfil completo: decisão do time, a validar com a PO (a #272 foi removida).
-- Documentação OpenAPI.
 
 ## Scripts disponíveis
 
@@ -258,6 +261,7 @@ Rota usada pela tela "Completar perfil" do app (Task #275, HSP-PBI-002-TSK-04). 
 │   ├── middlewares/    # service-token.js (rota interna), user-token.js (JWT do usuário)
 │   ├── tutors/         # controller e service da conclusão do perfil do Tutor
 │   └── users/          # controllers, service e regras do USER (provisionamento, /me e profile-policy.js)
+├── docs/openapi.yaml   # Contrato OpenAPI 3.1 de todas as rotas
 ├── eslint.config.js    # Configuração do linter
 ├── prisma.config.ts    # Configuração do Prisma CLI (schema, migrações e DATABASE_URL)
 ├── tsconfig.json       # Só para o editor resolver os tipos do prisma.config.ts

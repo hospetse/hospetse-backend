@@ -1,0 +1,298 @@
+openapi: 3.1.0
+info:
+  title: Hospetse Back-end
+  version: 0.1.0
+  description: |
+    API do back-end do Hospetse. O README traz o contexto de cada rota (decisões, idempotência, pendências).
+    Erros seguem `{ code, message, details? }`; o formato definitivo depende da #56.
+servers:
+  - url: http://localhost:3000
+    description: Desenvolvimento local
+
+tags:
+  - name: Saúde
+    description: Liveness e readiness
+  - name: Interno
+    description: Chamadas só pelo Auth Server
+  - name: Usuário
+    description: Rotas do app, autenticadas pelo JWT do usuário
+
+paths:
+  /health:
+    get:
+      tags: [Saúde]
+      operationId: getHealth
+      summary: Liveness
+      description: Só confirma que o processo responde; não acessa o banco.
+      security: []
+      responses:
+        '200':
+          description: Processo no ar
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: Server is running }
+
+  /health/ready:
+    get:
+      tags: [Saúde]
+      operationId: getReadiness
+      summary: Readiness
+      description: Executa `SELECT 1` no banco com limite de 2 segundos; nunca escreve.
+      security: []
+      responses:
+        '200':
+          description: Banco respondendo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ready }
+                  database: { type: string, example: ok }
+        '503':
+          description: Banco indisponível ou lento
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: not_ready }
+                  database: { type: string, example: unavailable }
+
+  /api/v1/internal/users/{authUserId}:
+    put:
+      tags: [Interno]
+      operationId: provisionUser
+      summary: Provisiona o USER a partir do Auth Server (#259)
+      description: Idempotente pelo `authUserId`. A autenticação é verificada antes do body.
+      security:
+        - serviceToken: []
+      parameters:
+        - name: authUserId
+          in: path
+          required: true
+          description: '`user_auth.id` do Auth, que também vai no `sub` do JWT'
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, name]
+              properties:
+                email: { type: string, format: email, maxLength: 255 }
+                name: { type: string, minLength: 1, maxLength: 255 }
+      responses:
+        '201':
+          description: USER criado agora
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProvisionedUser' }
+        '200':
+          description: USER já existia com o mesmo authUserId e e-mail (retentativa)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProvisionedUser' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401':
+          description: '`SERVICE_TOKEN_INVALID`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`EMAIL_ALREADY_IN_USE` ou `AUTH_USER_ID_CONFLICT`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/me:
+    get:
+      tags: [Usuário]
+      operationId: getMe
+      summary: Estado do usuário e do perfil (#262)
+      security:
+        - userJwt: []
+      responses:
+        '200':
+          description: Token válido e USER encontrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      authUserId: { type: string, format: uuid }
+                      email: { type: string, format: email }
+                      name: { type: string }
+                  profile:
+                    type: object
+                    properties:
+                      status: { type: string, enum: [incomplete, complete] }
+                      missingFields:
+                        type: array
+                        description: Campos do perfil do Tutor ainda vazios; sem TUTOR, todos aparecem
+                        items: { type: string, enum: [cpf, birthDate, phone, address, emergencyContact] }
+                  permissions:
+                    type: object
+                    properties:
+                      canSearch: { type: boolean }
+                      canContract:
+                        type: boolean
+                        description: '`true` só com perfil complete e conta que não esteja blocked ou suspended'
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+
+  /api/v1/me/tutor-profile:
+    put:
+      tags: [Usuário]
+      operationId: putTutorProfile
+      summary: Conclui ou edita o perfil do Tutor (#275)
+      description: |
+        Grava endereço, Tutor e USER `complete` em uma transação. Na primeira chamada cria o TUTOR; nas seguintes, atualiza.
+        O usuário vem só do `sub` do JWT. Depois do `204`, o app chama o `/me`.
+      security:
+        - userJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TutorProfile' }
+      responses:
+        '204':
+          description: Perfil gravado e marcado como complete. Sem corpo (o CPF nunca volta em resposta).
+        '400':
+          description: Todos os campos inválidos, incluindo CPF já usado por outro usuário. O valor recebido não volta.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+              example:
+                code: VALIDATION_ERROR
+                message: Payload inválido
+                details:
+                  - { field: cpf, message: CPF já cadastrado }
+                  - { field: birthDate, message: idade mínima de 18 anos }
+                  - { field: address.zipCode, message: deve ter 8 dígitos }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+components:
+  securitySchemes:
+    userJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token do Auth (RS256, iss hospetse-auth-service, aud hospetse-backend). O `sub` é o authUserId.
+    serviceToken:
+      type: http
+      scheme: bearer
+      description: INTERNAL_SERVICE_TOKEN compartilhado com o Auth (provisório até a #254).
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+
+    ValidationError:
+      type: object
+      required: [code, message, details]
+      properties:
+        code: { type: string, const: VALIDATION_ERROR }
+        message: { type: string }
+        details:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string, description: 'Campos aninhados com ponto: address.zipCode' }
+              message: { type: string }
+
+    ProvisionedUser:
+      type: object
+      properties:
+        userId: { type: string, format: uuid }
+        authUserId: { type: string, format: uuid }
+
+    Phone:
+      type: string
+      pattern: '^\d{10,11}$'
+      description: Só dígitos, com DDD, sem +55 [assunção]
+      example: '11999999999'
+
+    TutorProfile:
+      type: object
+      additionalProperties: false
+      required: [cpf, birthDate, phone, emergencyContact, address]
+      properties:
+        cpf:
+          type: string
+          description: Com ou sem pontuação; dígitos verificadores válidos e não usado por outro usuário. Gravado só com os dígitos.
+          example: 529.982.247-25
+        birthDate:
+          type: string
+          format: date
+          description: Data real, idade mínima de 18 anos
+          example: '1990-05-10'
+        phone: { $ref: '#/components/schemas/Phone' }
+        emergencyContact:
+          type: object
+          additionalProperties: false
+          required: [name, phone]
+          properties:
+            name: { type: string, minLength: 1, maxLength: 255 }
+            phone: { $ref: '#/components/schemas/Phone' }
+        address:
+          type: object
+          additionalProperties: false
+          required: [zipCode, street, number, neighborhood, city, state]
+          properties:
+            zipCode:
+              type: string
+              pattern: '^\d{5}-?\d{3}$'
+              description: Com ou sem hífen [assunção]; gravado sem
+              example: 01001-000
+            street: { type: string, minLength: 1, maxLength: 255 }
+            number: { type: string, minLength: 1, maxLength: 20 }
+            complement: { type: [string, 'null'], maxLength: 100 }
+            neighborhood: { type: string, minLength: 1, maxLength: 100 }
+            city: { type: string, minLength: 1, maxLength: 100 }
+            state:
+              type: string
+              pattern: '^[A-Za-z]{2}$'
+              description: Sigla da UF; gravada em maiúsculas
+              example: SP
+
+  responses:
+    ValidationError:
+      description: Todos os campos inválidos
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ValidationError' }
+    TokenInvalid:
+      description: '`TOKEN_INVALID`: cabeçalho ausente, token mal formado, assinatura errada, expirado ou iss/aud diferente'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    UserNotFound:
+      description: '`USER_NOT_FOUND`: token válido, mas sem USER com esse authUserId'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InternalError:
+      description: '`INTERNAL_ERROR`: falha inesperada'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
