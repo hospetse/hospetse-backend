@@ -33,6 +33,7 @@ Variáveis disponíveis (ver `.env.example` para a lista completa e atualizada):
 | `PORT` | Porta em que o servidor HTTP sobe | `3000` |
 | `DATABASE_URL` | String de conexão do PostgreSQL usada pelo Prisma | valor mantido apenas no `.env` |
 | `SMOKE_DATABASE_URL` | Opcional. Substitui a `DATABASE_URL` só no `npm run smoke:db` (para simular falhas) | valor temporário mantido apenas no ambiente |
+| `JWT_PUBLIC_KEY` | Chave pública RS256 do Auth Server (PEM, entre aspas), usada para validar o access token em [`GET /api/v1/me`](#estado-do-usuário-get-apiv1me). Mesmo valor da `JWT_PUBLIC_KEY` do Auth | valor mantido apenas no `.env` |
 | `INTERNAL_SERVICE_TOKEN` | Segredo compartilhado com o Auth Server, exigido na [rota interna de provisionamento](#rota-interna-de-provisionamento-do-user). Mesmo valor nos dois serviços, diferente por ambiente | valor mantido apenas no `.env` |
 
 > O arquivo `.env` nunca deve ser commitado (já está no `.gitignore`). Segredos e configuração de ambiente ficam só localmente ou no painel da plataforma de deploy.
@@ -150,6 +151,31 @@ Se o back-end gravar o USER e a resposta se perder (timeout), a repetição rece
 - Formato definitivo do erro padrão (#56). Até lá, vale `{ code, message, details? }`.
 - Troca do `INTERNAL_SERVICE_TOKEN` pelo token de serviço RS256 (#254).
 
+## Estado do usuário: `GET /api/v1/me`
+
+Rota usada pelo app para montar a tela inicial (Task #262, HSP-PBI-001-TSK-04).
+
+**Autenticação:** `Authorization: Bearer <accessToken>`, com o access token (JWT) devolvido pelo `register` ou pelo `refresh` do Auth. O back-end valida com a `JWT_PUBLIC_KEY`: assinatura RS256, `iss: hospetse-auth-service`, `aud: hospetse-backend` e `exp` (15 min). O `sub` do token é o `authUserId` e localiza o USER em `users.auth_user_id`.
+
+| Status | `code` | Caso | Body |
+| --- | --- | --- | --- |
+| `200` | — | Token válido e USER encontrado | ver abaixo |
+| `401` | `TOKEN_INVALID` | Cabeçalho ausente, token mal formado, assinatura errada, expirado ou com `iss`/`aud` diferente | `{ "code", "message" }` |
+| `404` | `USER_NOT_FOUND` | Token válido, mas não existe USER com esse `authUserId` | `{ "code", "message" }` |
+
+```json
+{
+  "user": { "id": "uuid", "authUserId": "uuid", "email": "tutor@exemplo.com", "name": "Maria Silva" },
+  "profile": { "status": "incomplete", "missingFields": ["cpf", "birthDate", "phone"] },
+  "permissions": { "canSearch": true, "canContract": false }
+}
+```
+
+- `missingFields`: campos do perfil do Tutor (`cpf`, `birthDate`, `phone`) ainda vazios. Sem TUTOR, todos aparecem. Provisório até a PBI-002 definir o que é um perfil completo.
+- `canSearch`: `true` para qualquer usuário autenticado.
+- `canContract`: `true` só com `profile_status = complete` e conta que não esteja `blocked` ou `suspended`. A mesma regra (`src/users/profile-policy.js`) será usada no bloqueio da contratação (TSK-05).
+- A resposta lista só esses campos: senha e segredos nunca saem.
+
 ## Scripts disponíveis
 
 | Comando | O que faz |
@@ -168,9 +194,9 @@ Se o back-end gravar o USER e a resposta se perder (timeout), a repetição rece
 ├── index.js            # Carrega o ambiente e chama .listen() — ponto de entrada real
 ├── src/
 │   ├── app.js          # Exporta a aplicação Express e registra as rotas (sem subir servidor)
-│   ├── lib/            # prisma.js (instância única do Prisma Client), app-error.js
-│   ├── middlewares/    # service-token.js (rota interna)
-│   └── users/          # controller e service do provisionamento do USER
+│   ├── lib/            # prisma.js (instância única do Prisma Client), app-error.js, jwt.js
+│   ├── middlewares/    # service-token.js (rota interna), user-token.js (JWT do usuário)
+│   └── users/          # controllers, service e regras do USER (provisionamento e /me)
 ├── eslint.config.js    # Configuração do linter
 ├── prisma.config.ts    # Configuração do Prisma CLI (schema, migrações e DATABASE_URL)
 ├── tsconfig.json       # Só para o editor resolver os tipos do prisma.config.ts

@@ -2,6 +2,8 @@ import express from 'express';
 import { prisma } from './lib/prisma.js';
 import { requireServiceToken } from './middlewares/service-token.js';
 import { provisionUserController } from './users/internal-users.controller.js';
+import { requireUser } from './middlewares/user-token.js';
+import { meController } from './users/me.controller.js';
 
 // Tempo máximo que /health/ready espera pela verificação do banco.
 export const READY_TIMEOUT_MS = 2000;
@@ -40,5 +42,8 @@ app.get('/health/ready', async (req, res)=>{
 
 // Provisionamento do USER pelo Auth Server (TSK-01 #259). Ordem: token → leitura do JSON → controller.
 app.put('/api/v1/internal/users/:authUserId', requireServiceToken, express.json(), provisionUserController);
+
+// Estado do usuário e do perfil para o app (TSK-04 #262). Ordem: JWT do usuário → controller.
+app.get('/api/v1/me', requireUser, meController);
 
 export default app;
