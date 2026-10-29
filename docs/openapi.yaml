@@ -5,9 +5,20 @@ info:
   description: |
     API do back-end do Hospetse. O README traz o contexto de cada rota (decisões, idempotência, pendências).
     Erros seguem `{ code, message, details? }`; o formato definitivo depende da #56.
+
+    **Autenticação (#298):** tudo sob `/api/v1` é protegido por padrão, antes de chegar na rota.
+    `/api/v1/internal/*` exige o token de serviço do Auth; o resto exige o JWT do usuário.
+    Sem autenticação válida, qualquer caminho sob `/api/v1` responde `401`, inclusive os que não existem.
+
+    **Inventário das rotas públicas** (as únicas com `security: []`): `GET /health` e `GET /health/ready`.
+    Uma rota pública nova precisa entrar aqui e na lista `PUBLIC_ROUTES` do `test/auth-guard.test.js`.
 servers:
   - url: http://localhost:3000
     description: Desenvolvimento local
+
+# Padrão: JWT do usuário. As rotas públicas e a interna declaram o próprio security.
+security:
+  - userJwt: []
 
 tags:
   - name: Saúde
