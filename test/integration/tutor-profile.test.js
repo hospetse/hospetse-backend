@@ -154,3 +154,53 @@ test('CPF de outro usuário: 400 em cpf e o perfil do outro não muda', async ()
     const ownerTutor = await prisma.tutor.findUnique({ where: { userId: owner.user.id } });
     assert.strictEqual(ownerTutor.cpf, cpf);
 });
+
+// Cenários isolados da TSK-07 (#278): um erro por vez, o resto do body válido.
+async function expectOnlyError(body, field, message) {
+    const { user, auth } = await newUser();
+    const res = await http.put('/api/v1/me/tutor-profile', body, auth);
+    assert.strictEqual(res.status, 400);
+    assert.deepStrictEqual(res.data.details, [{ field, message }]);
+    const saved = await prisma.user.findUnique({ where: { id: user.id } });
+    assert.strictEqual(saved.profileStatus, 'incomplete');
+}
+
+test('CPF com dígito verificador errado: 400 só em cpf', async () => {
+    const cpf = randomCpf();
+    const wrongDigit = cpf.slice(0, 10) + ((Number(cpf[10]) + 1) % 10);
+    await expectOnlyError({ ...validBody(cpf), cpf: wrongDigit }, 'cpf', 'CPF inválido');
+});
+
+test('menor de 18 anos: 400 só em birthDate', async () => {
+    const today = new Date();
+    const seventeen = `${today.getUTCFullYear() - 17}-01-01`;
+    await expectOnlyError({ ...validBody(randomCpf()), birthDate: seventeen }, 'birthDate', 'idade mínima de 18 anos');
+});
+
+test('body vazio: 400 com todos os campos obrigatórios', async () => {
+    const { auth } = await newUser();
+    const res = await http.put('/api/v1/me/tutor-profile', {}, auth);
+    assert.strictEqual(res.status, 400);
+    assert.deepStrictEqual(res.data.details.map((d) => d.field), ['cpf', 'birthDate', 'phone', 'emergencyContact', 'address']);
+});
+
+test('titular diferente: cada um só altera o próprio perfil', async () => {
+    const ana = await newUser();
+    const bruno = await newUser();
+    const anaCpf = randomCpf();
+    await http.put('/api/v1/me/tutor-profile', validBody(anaCpf), ana.auth);
+
+    const brunoBody = validBody(randomCpf());
+    brunoBody.address.street = 'Rua do Bruno';
+    const res = await http.put('/api/v1/me/tutor-profile', brunoBody, bruno.auth);
+    assert.strictEqual(res.status, 204);
+
+    const anaTutor = await prisma.tutor.findUnique({ where: { userId: ana.user.id }, include: { address: true } });
+    assert.strictEqual(anaTutor.cpf, anaCpf);
+    assert.strictEqual(anaTutor.address.street, 'Rua A');
+    const brunoTutor = await prisma.tutor.findUnique({ where: { userId: bruno.user.id }, include: { address: true } });
+    assert.notStrictEqual(brunoTutor.addressId, anaTutor.addressId);
+});
+
+// shortcut: depende da guarda de contratação da #263 (rotas de reserva ainda não existem); escrever quando ela entrar.
+test.todo('perfil complete passa pela guarda da #263 e incompleto recebe 403 PROFILE_INCOMPLETE');
