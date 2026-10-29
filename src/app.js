@@ -1,4 +1,5 @@
 import express from 'express';
+import { fileURLToPath } from 'node:url';
 import { prisma } from './lib/prisma.js';
 import { requireServiceToken } from './middlewares/service-token.js';
 import { provisionUserController } from './users/internal-users.controller.js';
@@ -11,7 +12,7 @@ export const READY_TIMEOUT_MS = 2000;
 
 const app = express();
 
-// Rotas públicas (inventário no docs/openapi.yaml): só /health e /health/ready, fora do /api/v1.
+// Rotas públicas (inventário no docs/openapi.yaml): /health, /health/ready e a documentação em /docs, fora do /api/v1.
 
 // Liveness: só confirma que o processo responde; não acessa o banco.
 app.get('/health', (req, res)=>{
@@ -38,6 +39,11 @@ app.get('/health/ready', async (req, res)=>{
         clearTimeout(timer);
     }
 });
+
+// Documentação da API (TSK-02 #501): página do Swagger UI e o contrato que ela lê.
+const docsDir = fileURLToPath(new URL('../docs/', import.meta.url));
+app.get('/docs', (req, res) => res.sendFile('index.html', { root: docsDir }));
+app.get('/docs/openapi.yaml', (req, res) => res.type('text/yaml').sendFile('openapi.yaml', { root: docsDir }));
 
 // Protegido por padrão (TSK-04 #298): tudo sob /api/v1 exige autenticação antes de chegar na rota,
 // então uma rota nova já nasce protegida. As internas usam o token de serviço do Auth; o resto, o JWT do usuário.

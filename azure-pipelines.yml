@@ -1,0 +1,63 @@
+# Roda a cada push na main (o CD publica a partir da main, que é a branch de produção do back-end).
+# O CI dos PRs é disparado pela branch policy (Build validation) da main.
+trigger:
+  branches:
+    include: [main]
+
+# Postgres descartável só para os testes do CI: nasce vazio e morre com a VM
+resources:
+  containers:
+    - container: postgres
+      image: postgres:16
+      env:
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
+        POSTGRES_DB: backend_test
+      ports:
+        - 5432:5432
+
+stages:
+  - stage: CI
+    jobs:
+      - job: lint_e_testes
+        pool:
+          vmImage: ubuntu-latest
+        services:
+          postgres: postgres
+        steps:
+          - task: UseNode@1
+            inputs:
+              version: 22.x
+          - script: npm ci
+            displayName: Instalar dependências
+          - script: npm run lint
+            displayName: Lint
+          - script: npm test
+            displayName: Testes sem banco
+          - script: |
+              # Os testes geram as próprias chaves do JWT; só o banco vem de fora
+              export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/backend_test"
+              # A VM começa sem o client do Prisma gerado
+              npx prisma generate
+              npx prisma migrate deploy
+              npm run test:integration
+            displayName: Migrations e testes de integração
+
+  - stage: CD
+    dependsOn: CI
+    # Só publica a partir da main e nunca de um PR (o Railway tem um único ambiente por enquanto)
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne(variables['Build.Reason'], 'PullRequest'))
+    variables:
+      - group: railway
+    jobs:
+      - job: deploy_railway
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: npm install -g @railway/cli
+            displayName: Instalar Railway CLI
+          # As migrations rodam no início do container (CMD do Dockerfile), já com a DATABASE_URL do Railway
+          - script: railway up --ci --service backend
+            displayName: Deploy no Railway
+            env:
+              RAILWAY_TOKEN: $(RAILWAY_TOKEN)

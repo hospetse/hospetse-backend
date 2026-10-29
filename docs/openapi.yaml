@@ -10,9 +10,12 @@ info:
     `/api/v1/internal/*` exige o token de serviço do Auth; o resto exige o JWT do usuário.
     Sem autenticação válida, qualquer caminho sob `/api/v1` responde `401`, inclusive os que não existem.
 
-    **Inventário das rotas públicas** (as únicas com `security: []`): `GET /health` e `GET /health/ready`.
+    **Inventário das rotas públicas** (as únicas com `security: []`): `GET /health`, `GET /health/ready`,
+    `GET /docs` (esta documentação) e `GET /docs/openapi.yaml` (este arquivo).
     Uma rota pública nova precisa entrar aqui e na lista `PUBLIC_ROUTES` do `test/auth-guard.test.js`.
 servers:
+  - url: https://backend-production-7298.up.railway.app
+    description: Produção (Railway)
   - url: http://localhost:3000
     description: Desenvolvimento local
 
@@ -23,6 +26,8 @@ security:
 tags:
   - name: Saúde
     description: Liveness e readiness
+  - name: Documentação
+    description: Esta documentação
   - name: Interno
     description: Chamadas só pelo Auth Server
   - name: Usuário
@@ -72,6 +77,32 @@ paths:
                 properties:
                   status: { type: string, example: not_ready }
                   database: { type: string, example: unavailable }
+
+  /docs:
+    get:
+      tags: [Documentação]
+      operationId: getDocs
+      summary: Página do Swagger UI com este contrato
+      security: []
+      responses:
+        '200':
+          description: Página HTML
+          content:
+            text/html:
+              schema: { type: string }
+
+  /docs/openapi.yaml:
+    get:
+      tags: [Documentação]
+      operationId: getOpenApi
+      summary: Este contrato em YAML
+      security: []
+      responses:
+        '200':
+          description: OpenAPI 3.1
+          content:
+            text/yaml:
+              schema: { type: string }
 
   /api/v1/internal/users/{authUserId}:
     put:
