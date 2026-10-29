@@ -1,8 +1,8 @@
-# Roda a cada push na main (o CD publica a partir da main, que é a branch de produção do back-end).
-# O CI dos PRs é disparado pela branch policy (Build validation) da main.
+# Roda a cada push na develop e na main (o CD só publica a partir da develop, como no Auth).
+# O CI dos PRs é disparado pela branch policy (Build validation) de cada branch.
 trigger:
   branches:
-    include: [main]
+    include: [develop, main]
 
 # Postgres descartável só para os testes do CI: nasce vazio e morre com a VM
 resources:
@@ -45,8 +45,8 @@ stages:
 
   - stage: CD
     dependsOn: CI
-    # Só publica a partir da main e nunca de um PR (o Railway tem um único ambiente por enquanto)
-    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne(variables['Build.Reason'], 'PullRequest'))
+    # Só publica a partir da develop e nunca de um PR (o Railway tem um único ambiente por enquanto)
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'), ne(variables['Build.Reason'], 'PullRequest'))
     variables:
       - group: railway
     jobs:

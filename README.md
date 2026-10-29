@@ -257,7 +257,7 @@ Rota usada pela tela "Completar perfil" do app (Task #275, HSP-PBI-002-TSK-04). 
 
 O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, ambiente `production`): https://backend-production-7298.up.railway.app. URLs e contratos para o Mobile estão na wiki, em Index/Desenvolvimento/Back-end/APIs publicadas - URLs e contratos.
 
-- **Publicação:** o `azure-pipelines.yml` roda o CI (lint, `npm test` e `npm run test:integration` com um Postgres descartável) em cada PR para a `main`, e a cada push na `main` publica com `railway up --service backend` (Task #500). Deploy manual, se precisar: `railway up --service backend`, com a pasta ligada ao projeto (`railway link`).
+- **Publicação:** o `azure-pipelines.yml` roda o CI (lint, `npm test` e `npm run test:integration` com um Postgres descartável) em cada PR para a `develop` e para a `main`, e a cada push na `develop` publica com `railway up --service backend` (Task #500), como o Auth. Branches de trabalho saem da `develop` e voltam por PR (ADR-014). Deploy manual, se precisar: `railway up --service backend`, com a pasta ligada ao projeto (`railway link`).
 - **Imagem:** o `Dockerfile` roda `prisma migrate deploy` antes de `node index.js`. Se uma migration falhar, o container não sobe e o deploy falha à vista.
 - **Health check:** o `railway.json` configura `/health`; o Railway só troca de versão quando a nova responde.
 - **Variáveis do serviço** (no Railway, nunca no repositório):
