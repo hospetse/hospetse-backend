@@ -19,7 +19,7 @@ const http = axios.create({ baseURL: `http://localhost:${server.address().port}`
 after(() => server.close());
 
 // Únicas rotas que respondem sem autenticação. Uma rota pública nova precisa entrar aqui e no OpenAPI.
-const PUBLIC_ROUTES = ['GET /health', 'GET /health/ready'];
+const PUBLIC_ROUTES = ['GET /health', 'GET /health/ready', 'GET /docs', 'GET /docs/openapi.yaml'];
 
 function token({ iss = 'hospetse-auth-service', aud = 'hospetse-backend', exp = '5m', key = privateKey } = {}) {
     return new SignJWT({})

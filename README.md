@@ -77,7 +77,7 @@ O limite de 2 s do `/health/ready` é aplicado pela corrida da rota e também po
 
 ## Documentação da API
 
-O contrato de todas as rotas está em [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1). As seções abaixo explicam o contexto e as decisões de cada rota. Para validar o arquivo: `npx @redocly/cli lint docs/openapi.yaml`.
+O contrato de todas as rotas está em [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1), navegável em `GET /docs` (Swagger UI) no servidor local e em produção: https://backend-production-7298.up.railway.app/docs. As seções abaixo explicam o contexto e as decisões de cada rota. Para validar o arquivo: `npx @redocly/cli lint docs/openapi.yaml`.
 
 ### Autenticação das rotas
 
@@ -281,6 +281,24 @@ Guarda de contratação por completude do perfil (Task #263, HSP-PBI-001-TSK-05)
 - \[provisório\] `src/contracts/` só existe enquanto as rotas não têm implementação real: responde `501` para quem passa pela guarda. A #494 (PBI-039, solicitação de hospedagem) e as tasks de reserva e checkout trocam o handler pelo controller real, mantendo a guarda e chamando `assertCanContract` no service.
 - Body e resposta de sucesso de cada rota: definidos por essas tasks.
 
+## Deploy (Railway)
+
+O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, ambiente `production`): https://backend-production-7298.up.railway.app. URLs e contratos para o Mobile estão na wiki, em Index/Desenvolvimento/Back-end/APIs publicadas - URLs e contratos.
+
+- **Publicação:** o `azure-pipelines.yml` roda o CI (lint, `npm test` e `npm run test:integration` com um Postgres descartável) em cada PR para a `main`, e a cada push na `main` publica com `railway up --service backend` (Task #500). Deploy manual, se precisar: `railway up --service backend`, com a pasta ligada ao projeto (`railway link`).
+- **Imagem:** o `Dockerfile` roda `prisma migrate deploy` antes de `node index.js`. Se uma migration falhar, o container não sobe e o deploy falha à vista.
+- **Health check:** o `railway.json` configura `/health`; o Railway só troca de versão quando a nova responde.
+- **Variáveis do serviço** (no Railway, nunca no repositório):
+
+| Variável | Valor |
+| --- | --- |
+| `DATABASE_URL` | Referência `${{backend-service-db.DATABASE_URL}}`: rede interna do Railway, sem passar pela internet |
+| `JWT_PUBLIC_KEY` | A mesma chave pública do Auth |
+| `INTERNAL_SERVICE_TOKEN` | O mesmo valor do Auth |
+| `PORT` | Definida pelo próprio Railway (hoje 8080) |
+
+- **Auth → back-end:** o Auth chama a rota interna pela rede interna, com `BACKEND_URL=http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:8080` no serviço do Auth.
+
 ## Scripts disponíveis
 
 | Comando | O que faz |
@@ -305,6 +323,10 @@ Guarda de contratação por completude do perfil (Task #263, HSP-PBI-001-TSK-05)
 │   ├── tutors/         # controller e service da conclusão do perfil do Tutor
 │   └── users/          # controllers, service e regras do USER (provisionamento, /me e profile-policy.js)
 ├── docs/openapi.yaml   # Contrato OpenAPI 3.1 de todas as rotas
+├── docs/index.html     # Página do Swagger UI servida em /docs
+├── Dockerfile          # Imagem publicada no Railway (aplica as migrations ao subir)
+├── azure-pipelines.yml # CI (lint e testes) e CD (deploy no Railway a partir da main)
+├── railway.json        # Configuração do serviço no Railway (health check)
 ├── eslint.config.js    # Configuração do linter
 ├── prisma.config.ts    # Configuração do Prisma CLI (schema, migrações e DATABASE_URL)
 ├── tsconfig.json       # Só para o editor resolver os tipos do prisma.config.ts
