@@ -6,6 +6,8 @@ import { provisionUserController } from './users/internal-users.controller.js';
 import { requireUser } from './middlewares/user-token.js';
 import { meController } from './users/me.controller.js';
 import { tutorProfileController } from './tutors/tutor-profile.controller.js';
+import { requireCanContract } from './middlewares/can-contract.js';
+import { startContractController } from './contracts/contracts.controller.js';
 
 // Tempo máximo que /health/ready espera pela verificação do banco.
 export const READY_TIMEOUT_MS = 2000;
@@ -50,6 +52,11 @@ app.get('/docs/openapi.yaml', (req, res) => res.type('text/yaml').sendFile('open
 app.use('/api/v1/internal', requireServiceToken);
 app.use('/api/v1', (req, res, next) => (req.path.startsWith('/internal/') ? next() : requireUser(req, res, next)));
 
+// Contratação protegida por padrão (TSK-05 #263): todo POST sob estes caminhos exige conta e perfil aptos.
+// Só o POST: consultar ou cancelar o que já existe continua liberado para quem não pode mais contratar.
+const CONTRACT_PATHS = ['/api/v1/reservations', '/api/v1/service-requests', '/api/v1/checkout'];
+app.use(CONTRACT_PATHS, (req, res, next) => (req.method === 'POST' ? requireCanContract(req, res, next) : next()));
+
 // Provisionamento do USER pelo Auth Server (TSK-01 #259). Ordem: token de serviço → leitura do JSON → controller.
 app.put('/api/v1/internal/users/:authUserId', express.json(), provisionUserController);
 
@@ -58,6 +65,9 @@ app.get('/api/v1/me', meController);
 
 // Conclusão do perfil do Tutor (TSK-04 #275). Ordem: JWT do usuário → leitura do JSON → controller.
 app.put('/api/v1/me/tutor-profile', express.json(), tutorProfileController);
+
+// Contratação (TSK-05 #263). Ordem: JWT do usuário → conta e perfil aptos → controller (provisório, responde 501).
+for (const path of CONTRACT_PATHS) app.post(path, startContractController);
 
 // Rota inexistente fora do /api/v1 (dentro dele, sem token, o 401 vem antes): JSON em vez da página HTML do Express.
 app.use((req, res) => {

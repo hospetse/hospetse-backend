@@ -87,6 +87,7 @@ Tudo sob `/api/v1` é protegido por padrão no `src/app.js` (Task #298): dois `a
 | --- | --- | --- |
 | `/api/v1/internal/*` | Token de serviço do Auth (`requireServiceToken`) | `401 SERVICE_TOKEN_INVALID` |
 | Resto de `/api/v1/*` | JWT do usuário (`requireUser`) | `401 TOKEN_INVALID`; JWT válido sem USER: `404 USER_NOT_FOUND` |
+| `POST` em `/api/v1/reservations`, `/service-requests`, `/checkout` | JWT do usuário + conta e perfil aptos (`requireCanContract`, #263) | `403 ACCOUNT_RESTRICTED` ou `403 PROFILE_INCOMPLETE` (ver [Contratação](#contratação-post-apiv1reservations-service-requests-e-checkout)) |
 | `GET /health`, `GET /health/ready` | Nenhuma (públicas) | — |
 
 - As rotas públicas são só as duas acima. Uma rota pública nova precisa entrar no OpenAPI e na lista `PUBLIC_ROUTES` do `test/auth-guard.test.js`, que percorre todas as rotas registradas e falha se alguma responder sem autenticação.
@@ -253,6 +254,33 @@ Rota usada pela tela "Completar perfil" do app (Task #275, HSP-PBI-002-TSK-04). 
 - \[assunção\] Formato do telefone e do CEP: alinhar com o mobile.
 - Telefone como campo obrigatório do perfil completo: decisão do time, a validar com a PO (a #272 foi removida).
 
+## Contratação: `POST /api/v1/reservations`, `/service-requests` e `/checkout`
+
+Guarda de contratação por completude do perfil (Task #263, HSP-PBI-001-TSK-05): só quem tem conta ativa e perfil `complete` pode contratar. A regra fica no back-end, então vale mesmo que o app não bloqueie o botão.
+
+**Ordem no `src/app.js`:** JWT do usuário (`requireUser`, global do `/api/v1`) → guarda de contratação (`requireCanContract`) → controller. A guarda segue o mesmo formato do protegido por padrão: um `app.use` com a lista `CONTRACT_PATHS`, antes das rotas. Uma rota nova sob esses caminhos já nasce com a guarda.
+
+**Respostas:**
+
+| Status | `code` | Caso |
+| --- | --- | --- |
+| `401` | `TOKEN_INVALID` | Igual ao `/me` |
+| `404` | `USER_NOT_FOUND` | Igual ao `/me` |
+| `403` | `ACCOUNT_RESTRICTED` | Conta `blocked` ou `suspended` (conferida antes do perfil) |
+| `403` | `PROFILE_INCOMPLETE` | Perfil que não está `complete`. Mensagem: "Complete seu perfil antes de contratar um serviço." |
+| `501` | `NOT_IMPLEMENTED` | Passou pela guarda, mas a criação ainda não existe (provisório) |
+| `500` | `INTERNAL_ERROR` | Falha inesperada no back-end |
+
+- A regra está em `contractDenial` (`src/users/profile-policy.js`), a mesma que calcula o `canContract` do `/me`: o app e o back-end nunca discordam. Conta `pending` não bloqueia, porque todo USER novo nasce assim.
+- A guarda vale só para o `POST`: consultar ou cancelar o que já existe continua liberado para quem não pode mais contratar.
+- Perfil incompleto continua navegando: `/me` e as rotas de busca não passam pela guarda.
+- A regra também é conferida na camada de service (`assertCanContract`), para valer mesmo se uma rota não tiver a guarda.
+
+**Pendências:**
+
+- \[provisório\] `src/contracts/` só existe enquanto as rotas não têm implementação real: responde `501` para quem passa pela guarda. A #494 (PBI-039, solicitação de hospedagem) e as tasks de reserva e checkout trocam o handler pelo controller real, mantendo a guarda e chamando `assertCanContract` no service.
+- Body e resposta de sucesso de cada rota: definidos por essas tasks.
+
 ## Deploy (Railway)
 
 O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, ambiente `production`): https://backend-production-7298.up.railway.app. URLs e contratos para o Mobile estão na wiki, em Index/Desenvolvimento/Back-end/APIs publicadas - URLs e contratos.
@@ -290,7 +318,8 @@ O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, amb
 ├── src/
 │   ├── app.js          # Exporta a aplicação Express e registra as rotas (sem subir servidor)
 │   ├── lib/            # prisma.js (instância única do Prisma Client), app-error.js, jwt.js, cpf.js
-│   ├── middlewares/    # service-token.js (rota interna), user-token.js (JWT do usuário)
+│   ├── middlewares/    # service-token.js (rota interna), user-token.js (JWT do usuário), can-contract.js (guarda de contratação)
+│   ├── contracts/      # controller e service provisórios das rotas de contratação (respondem 501)
 │   ├── tutors/         # controller e service da conclusão do perfil do Tutor
 │   └── users/          # controllers, service e regras do USER (provisionamento, /me e profile-policy.js)
 ├── docs/openapi.yaml   # Contrato OpenAPI 3.1 de todas as rotas
@@ -309,7 +338,8 @@ O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, amb
 │   ├── health.test.js  # /health sem banco
 │   ├── auth-guard.test.js # Proteção das rotas: inventário, tokens inválidos, 404/400/500 em JSON
 │   ├── cpf.test.js     # Validação de CPF
-│   ├── profile-policy.test.js # Regra de completude e idade mínima
+│   ├── profile-policy.test.js # Regra de completude, idade mínima e regra de contratação
+│   ├── contracts.test.js # Guarda de contratação: 403, 501 e só o POST (USERs simulados, sem banco)
 │   ├── smoke/
 │   │   └── smoke-db.js # Smoke check do banco (npm run smoke:db)
 │   └── integration/    # Testes contra o banco real (npm run test:integration)
