@@ -79,6 +79,20 @@ O limite de 2 s do `/health/ready` é aplicado pela corrida da rota e também po
 
 O contrato de todas as rotas está em [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1). As seções abaixo explicam o contexto e as decisões de cada rota. Para validar o arquivo: `npx @redocly/cli lint docs/openapi.yaml`.
 
+### Autenticação das rotas
+
+Tudo sob `/api/v1` é protegido por padrão no `src/app.js` (Task #298): dois `app.use` rodam antes das rotas, então uma rota nova já nasce protegida sem precisar lembrar do middleware.
+
+| Caminho | Autenticação | Sem credencial válida |
+| --- | --- | --- |
+| `/api/v1/internal/*` | Token de serviço do Auth (`requireServiceToken`) | `401 SERVICE_TOKEN_INVALID` |
+| Resto de `/api/v1/*` | JWT do usuário (`requireUser`) | `401 TOKEN_INVALID`; JWT válido sem USER: `404 USER_NOT_FOUND` |
+| `GET /health`, `GET /health/ready` | Nenhuma (públicas) | — |
+
+- As rotas públicas são só as duas acima. Uma rota pública nova precisa entrar no OpenAPI e na lista `PUBLIC_ROUTES` do `test/auth-guard.test.js`, que percorre todas as rotas registradas e falha se alguma responder sem autenticação.
+- Caminho inexistente sob `/api/v1` responde `401` para quem não está autenticado: sem token, não dá para descobrir quais rotas existem. Fora do `/api/v1`, responde `404 NOT_FOUND` em JSON.
+- Um tratador de erro no fim do `app.js` responde em JSON o que escapar das rotas: JSON malformado vira `400 VALIDATION_ERROR` e qualquer outro erro vira `500 INTERNAL_ERROR` (só a mensagem vai para o log). Sem ele, o Express devolveria a página HTML padrão, que fora de produção mostra o stack trace.
+
 ## Rota interna de provisionamento do USER
 
 Contrato entre o Auth Server e o back-end para criar o usuário local (Task #259, HSP-PBI-001-TSK-01). Compatível com o `HttpUserProvisioner` do Auth (#253).
@@ -271,6 +285,7 @@ Rota usada pela tela "Completar perfil" do app (Task #275, HSP-PBI-002-TSK-04). 
 ├── test/
 │   ├── app.test.js     # Testes sem banco (node:test)
 │   ├── health.test.js  # /health sem banco
+│   ├── auth-guard.test.js # Proteção das rotas: inventário, tokens inválidos, 404/400/500 em JSON
 │   ├── cpf.test.js     # Validação de CPF
 │   ├── profile-policy.test.js # Regra de completude e idade mínima
 │   ├── smoke/
@@ -278,7 +293,8 @@ Rota usada pela tela "Completar perfil" do app (Task #275, HSP-PBI-002-TSK-04). 
 │   └── integration/    # Testes contra o banco real (npm run test:integration)
 │       ├── db.test.js
 │       ├── ready.test.js
-│       └── tutor-profile.test.js
+│       ├── tutor-profile.test.js
+│       └── user-token.test.js # JWT válido sem USER
 ├── .env.example        # Modelo das variáveis de ambiente necessárias
 └── package.json
 ```
