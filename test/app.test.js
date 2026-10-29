@@ -12,8 +12,8 @@ test('Check /health route', async () => {
     assert.strictEqual(response.status, 200);
 });
 
-test('Check / route', async () => {
-    const response = await axios.get(`http://localhost:${port}/`);
-    assert.strictEqual(response.status, 200);
-    assert.strictEqual(response.data, 'Hello World');
+test('rota inexistente fora do /api/v1 responde 404 em JSON', async () => {
+    const response = await axios.get(`http://localhost:${port}/`, { validateStatus: () => true });
+    assert.strictEqual(response.status, 404);
+    assert.deepStrictEqual(response.data, { code: 'NOT_FOUND', message: 'Rota não encontrada' });
 });
