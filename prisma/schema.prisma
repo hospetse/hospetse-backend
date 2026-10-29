@@ -80,7 +80,13 @@ model Provider {
   rating           Decimal?               @db.Decimal(3, 2)
   urlPicture       String?                @map("url_picture") @db.VarChar(2048)
   status           String                 @default("active") @db.VarChar(20)
+  // pending, approved ou rejected (HSP-PBI-008-TSK-03 #323): só approved aparece nas consultas públicas
   validationStatus String                 @default("pending") @map("validation_status") @db.VarChar(20)
+  description      String?                @db.VarChar(2000)
+  // Restrições aceitas, com os mesmos valores de pets.pet_species/pet_size/pet_breed. Raças vazias = aceita todas
+  acceptedSpecies  String[]               @default([]) @map("accepted_species") @db.VarChar(100)
+  acceptedSizes    String[]               @default([]) @map("accepted_sizes") @db.VarChar(30)
+  acceptedBreeds   String[]               @default([]) @map("accepted_breeds") @db.VarChar(100)
   createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
   user             User                   @relation(fields: [userId], references: [id])
   address          Address?               @relation(fields: [addressId], references: [id])
