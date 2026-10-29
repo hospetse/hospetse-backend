@@ -75,6 +75,10 @@ curl http://localhost:3000/health/ready  # readiness (banco)
 
 O limite de 2 s do `/health/ready` é aplicado pela corrida da rota e também por `statement_timeout=2000` na URL derivada pelo cliente Prisma. Assim, a resposta HTTP e a consulta pendente no PostgreSQL têm o mesmo limite; a URL original de configuração não é exposta nem alterada no ambiente.
 
+## Documentação da API
+
+O contrato de todas as rotas está em [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1). As seções abaixo explicam o contexto e as decisões de cada rota. Para validar o arquivo: `npx @redocly/cli lint docs/openapi.yaml`.
+
 ## Rota interna de provisionamento do USER
 
 Contrato entre o Auth Server e o back-end para criar o usuário local (Task #259, HSP-PBI-001-TSK-01). Compatível com o `HttpUserProvisioner` do Auth (#253).
@@ -166,15 +170,74 @@ Rota usada pelo app para montar a tela inicial (Task #262, HSP-PBI-001-TSK-04).
 ```json
 {
   "user": { "id": "uuid", "authUserId": "uuid", "email": "tutor@exemplo.com", "name": "Maria Silva" },
-  "profile": { "status": "incomplete", "missingFields": ["cpf", "birthDate", "phone"] },
+  "profile": { "status": "incomplete", "missingFields": ["cpf", "birthDate", "phone", "address", "emergencyContact"] },
   "permissions": { "canSearch": true, "canContract": false }
 }
 ```
 
-- `missingFields`: campos do perfil do Tutor (`cpf`, `birthDate`, `phone`) ainda vazios. Sem TUTOR, todos aparecem. Provisório até a PBI-002 definir o que é um perfil completo.
+- `missingFields`: campos do perfil do Tutor ainda vazios, entre `cpf`, `birthDate`, `phone`, `address` e `emergencyContact` (nome e telefone). Sem TUTOR, todos aparecem. É a mesma regra usada pela conclusão do perfil (PBI-002, `src/users/profile-policy.js`).
 - `canSearch`: `true` para qualquer usuário autenticado.
 - `canContract`: `true` só com `profile_status = complete` e conta que não esteja `blocked` ou `suspended`. A mesma regra (`src/users/profile-policy.js`) será usada no bloqueio da contratação (TSK-05).
 - A resposta lista só esses campos: senha e segredos nunca saem.
+
+## Conclusão do perfil do Tutor: `PUT /api/v1/me/tutor-profile`
+
+Rota usada pela tela "Completar perfil" do app (Task #275, HSP-PBI-002-TSK-04). Grava os dados do Tutor e marca o perfil como `complete`, o que libera `canContract` no `/me`. A mesma rota serve para editar os dados depois.
+
+**Autenticação:** igual ao `/me`. O usuário vem só do `sub` do JWT: não há id na URL nem no body, então ninguém altera o perfil de outro usuário.
+
+**Body:**
+
+```json
+{
+  "cpf": "529.982.247-25",
+  "birthDate": "1990-05-10",
+  "phone": "11999999999",
+  "emergencyContact": { "name": "Maria Silva", "phone": "11988888888" },
+  "address": {
+    "zipCode": "01001-000",
+    "street": "Praça da Sé",
+    "number": "100",
+    "complement": "Apto 1",
+    "neighborhood": "Sé",
+    "city": "São Paulo",
+    "state": "SP"
+  }
+}
+```
+
+| Campo | Regra |
+| --- | --- |
+| `cpf` | Com ou sem pontuação. Dígitos verificadores válidos, sem todos os dígitos iguais e sem pertencer a outro usuário. Gravado só com os 11 dígitos |
+| `birthDate` | `YYYY-MM-DD`, data real (`2000-02-30` é recusada) e idade mínima de 18 anos |
+| `phone`, `emergencyContact.phone` | Só dígitos, com DDD: 10 ou 11 dígitos, sem `+55` \[assunção\] |
+| `emergencyContact.name` | Obrigatório, até 255 caracteres |
+| `address.zipCode` | 8 dígitos, com ou sem hífen \[assunção\]. Gravado sem o hífen |
+| `address.street` / `number` | Obrigatórios, até 255 / 20 caracteres |
+| `address.complement` | Opcional, até 100 caracteres |
+| `address.neighborhood` / `city` | Obrigatórios, até 100 caracteres |
+| `address.state` | Sigla com 2 letras. Gravada em maiúsculas |
+| Outros campos | Recusados com `400` (`não faz parte do contrato`) |
+
+**Respostas:**
+
+| Status | `code` | Caso | Body |
+| --- | --- | --- | --- |
+| `204` | — | Perfil gravado e marcado como `complete` | vazio |
+| `400` | `VALIDATION_ERROR` | Qualquer campo inválido, incluindo CPF já usado por outro usuário | `{ "code", "message", "details": [{ "field", "message" }] }`, com todos os campos inválidos (`address.zipCode`, `emergencyContact.name`...) |
+| `401` | `TOKEN_INVALID` | Igual ao `/me` | `{ "code", "message" }` |
+| `404` | `USER_NOT_FOUND` | Igual ao `/me` | `{ "code", "message" }` |
+| `500` | `INTERNAL_ERROR` | Falha inesperada no back-end | `{ "code", "message" }` |
+
+- O CPF nunca volta em resposta nem em log: o `details` diz qual campo está errado, não o valor recebido (LGPD).
+- Endereço, Tutor e USER são gravados em uma transação: ou tudo, ou nada. Na primeira chamada o TUTOR é criado (com o `name` do USER); nas seguintes, os dados e o mesmo endereço são atualizados.
+- `profile_completed_at` guarda a data da primeira conclusão: uma edição depois não a altera.
+- Depois do `204`, o app chama o `/me` para receber o novo estado.
+
+**Pendências:**
+
+- \[assunção\] Formato do telefone e do CEP: alinhar com o mobile.
+- Telefone como campo obrigatório do perfil completo: decisão do time, a validar com a PO (a #272 foi removida).
 
 ## Scripts disponíveis
 
@@ -194,9 +257,11 @@ Rota usada pelo app para montar a tela inicial (Task #262, HSP-PBI-001-TSK-04).
 ├── index.js            # Carrega o ambiente e chama .listen() — ponto de entrada real
 ├── src/
 │   ├── app.js          # Exporta a aplicação Express e registra as rotas (sem subir servidor)
-│   ├── lib/            # prisma.js (instância única do Prisma Client), app-error.js, jwt.js
+│   ├── lib/            # prisma.js (instância única do Prisma Client), app-error.js, jwt.js, cpf.js
 │   ├── middlewares/    # service-token.js (rota interna), user-token.js (JWT do usuário)
-│   └── users/          # controllers, service e regras do USER (provisionamento e /me)
+│   ├── tutors/         # controller e service da conclusão do perfil do Tutor
+│   └── users/          # controllers, service e regras do USER (provisionamento, /me e profile-policy.js)
+├── docs/openapi.yaml   # Contrato OpenAPI 3.1 de todas as rotas
 ├── eslint.config.js    # Configuração do linter
 ├── prisma.config.ts    # Configuração do Prisma CLI (schema, migrações e DATABASE_URL)
 ├── tsconfig.json       # Só para o editor resolver os tipos do prisma.config.ts
@@ -206,11 +271,14 @@ Rota usada pelo app para montar a tela inicial (Task #262, HSP-PBI-001-TSK-04).
 ├── test/
 │   ├── app.test.js     # Testes sem banco (node:test)
 │   ├── health.test.js  # /health sem banco
+│   ├── cpf.test.js     # Validação de CPF
+│   ├── profile-policy.test.js # Regra de completude e idade mínima
 │   ├── smoke/
 │   │   └── smoke-db.js # Smoke check do banco (npm run smoke:db)
 │   └── integration/    # Testes contra o banco real (npm run test:integration)
 │       ├── db.test.js
-│       └── ready.test.js
+│       ├── ready.test.js
+│       └── tutor-profile.test.js
 ├── .env.example        # Modelo das variáveis de ambiente necessárias
 └── package.json
 ```

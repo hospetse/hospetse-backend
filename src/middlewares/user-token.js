@@ -3,7 +3,7 @@ import { verifyAccessToken } from '../lib/jwt.js';
 
 const invalidToken = { code: 'TOKEN_INVALID', message: 'Token ausente ou inválido' };
 
-// Camada de autenticação do usuário: valida o JWT e carrega o USER (com o TUTOR) em req.user.
+// Camada de autenticação do usuário: valida o JWT e carrega o USER (com o TUTOR e o endereço) em req.user.
 export async function requireUser(req, res, next) {
     const header = req.headers.authorization;
     if (!header?.startsWith('Bearer ')) {
@@ -18,8 +18,8 @@ export async function requireUser(req, res, next) {
         return res.status(401).json(invalidToken);
     }
 
-    // sub = authUserId, gravado em users.auth_user_id pelo provisionamento (TSK-03)
-    const user = await prisma.user.findUnique({ where: { authUserId: sub }, include: { tutor: true } });
+    // sub = authUserId, gravado em users.auth_user_id pelo provisionamento (TSK-03); o address entra para o missingFields
+    const user = await prisma.user.findUnique({ where: { authUserId: sub }, include: { tutor: { include: { address: true } } } });
     if (!user) {
         return res.status(404).json({ code: 'USER_NOT_FOUND', message: 'Usuário não encontrado' });
     }
