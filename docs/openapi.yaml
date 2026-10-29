@@ -27,6 +27,8 @@ tags:
     description: Chamadas só pelo Auth Server
   - name: Usuário
     description: Rotas do app, autenticadas pelo JWT do usuário
+  - name: Contratação
+    description: Exigem conta ativa e perfil complete (#263). Provisórias até a #494 e as tasks de reserva e checkout
 
 paths:
   /health:
@@ -196,6 +198,47 @@ paths:
         '404': { $ref: '#/components/responses/UserNotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  # Contratação (#263): JWT do usuário → guarda de conta e perfil (só no POST) → controller provisório.
+  # shortcut: as três ainda não criam nada e respondem 501 para quem passa pela guarda; a #494 e as tasks de reserva/checkout definem body e sucesso.
+  /api/v1/reservations:
+    post:
+      tags: [Contratação]
+      operationId: createReservation
+      summary: Inicia uma reserva (guarda da #263; criação provisória)
+      description: A regra também é conferida na camada de service. Consultar (GET) não passa pela guarda.
+      responses:
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/ContractForbidden' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+
+  /api/v1/service-requests:
+    post:
+      tags: [Contratação]
+      operationId: createServiceRequest
+      summary: Inicia uma solicitação de serviço (guarda da #263; criação provisória, a #494 substitui)
+      description: A regra também é conferida na camada de service. Consultar (GET) não passa pela guarda.
+      responses:
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/ContractForbidden' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+
+  /api/v1/checkout:
+    post:
+      tags: [Contratação]
+      operationId: createCheckout
+      summary: Inicia um checkout (guarda da #263; criação provisória)
+      description: A regra também é conferida na camada de service. Consultar (GET) não passa pela guarda.
+      responses:
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/ContractForbidden' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+
 components:
   securitySchemes:
     userJwt:
@@ -307,3 +350,21 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    ContractForbidden:
+      description: |
+        Não pode contratar. A conta restrita é conferida antes do perfil:
+        `ACCOUNT_RESTRICTED` para conta blocked ou suspended; `PROFILE_INCOMPLETE` para perfil que não está complete.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            profileIncomplete:
+              value: { code: PROFILE_INCOMPLETE, message: Complete seu perfil antes de contratar um serviço. }
+            accountRestricted:
+              value: { code: ACCOUNT_RESTRICTED, message: Conta bloqueada ou suspensa }
+    NotImplemented:
+      description: '`NOT_IMPLEMENTED`: passou pela guarda de contratação, mas a criação ainda não existe (provisório)'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { code: NOT_IMPLEMENTED, message: Contratação ainda não disponível }
