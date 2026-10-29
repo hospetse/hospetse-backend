@@ -30,6 +30,10 @@ stages:
               version: 22.x
           - script: npm ci
             displayName: Instalar dependências
+          # A VM começa sem o client do Prisma, e o app importa o Prisma mesmo nos testes sem banco.
+          # O generate não conecta no banco, mas o prisma.config.ts exige a variável: valor falso só para gerar
+          - script: DATABASE_URL="postgresql://build:build@localhost:5432/build" npx prisma generate
+            displayName: Gerar o client do Prisma
           - script: npm run lint
             displayName: Lint
           - script: npm test
@@ -37,8 +41,6 @@ stages:
           - script: |
               # Os testes geram as próprias chaves do JWT; só o banco vem de fora
               export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/backend_test"
-              # A VM começa sem o client do Prisma gerado
-              npx prisma generate
               npx prisma migrate deploy
               npm run test:integration
             displayName: Migrations e testes de integração
