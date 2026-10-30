@@ -133,6 +133,34 @@ test('nenhum dado privado na resposta: documento, e-mail, endereço completo e i
     }
 });
 
+// HSP-PBI-031-TSK-03 (#481): Host recém-aprovado, sem avaliações e só com o obrigatório
+test('Host sem avaliações e sem dados opcionais: 200 com nulos e listas vazias', async () => {
+    const { provider } = await newHost({
+        rating: null,
+        description: null,
+        urlPicture: null,
+        addressId: null,
+        acceptedSpecies: [],
+        acceptedSizes: [],
+        photos: undefined,
+        services: undefined,
+    });
+    const res = await http.get(`/api/v1/hosts/${provider.id}`, auth);
+
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(res.data, {
+        id: provider.id,
+        name: 'Hotelzinho de Teste',
+        description: null,
+        pictureUrl: null,
+        location: { city: null, neighborhood: null },
+        photos: [],
+        accepts: { species: [], sizes: [], breeds: [] },
+        services: [],
+        reputation: { rating: null, reviewCount: 0 },
+    });
+});
+
 test('Host não elegível ou inexistente: o mesmo 404', async () => {
     const pending = await newHost({ validationStatus: 'pending' });
     const rejected = await newHost({ validationStatus: 'rejected' });
