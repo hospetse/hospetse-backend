@@ -20,10 +20,10 @@ const RESERVATION_FIELDS = {
 };
 
 // Lista vazia = o Host não restringe (os Hosts anteriores à #479 estão com as listas vazias)
-const accepts = (list, value) => list.length === 0 || list.some((item) => item.toLowerCase() === value?.toLowerCase());
+export const accepts = (list, value) => list.length === 0 || list.some((item) => item.toLowerCase() === value?.toLowerCase());
 
 // Mesma intenção = mesmo serviço, pet, período e observações
-const sameIntent = (saved, data) => saved.serviceId === data.serviceId && saved.petId === data.petId
+export const sameIntent = (saved, data) => saved.serviceId === data.serviceId && saved.petId === data.petId
     && saved.startDate.getTime() === data.startDate.getTime() && saved.endDate.getTime() === data.endDate.getTime()
     && (saved.notes ?? null) === data.notes;
 
