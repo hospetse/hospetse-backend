@@ -6,6 +6,7 @@ import { provisionUserController } from './users/internal-users.controller.js';
 import { requireUser } from './middlewares/user-token.js';
 import { meController } from './users/me.controller.js';
 import { tutorProfileController } from './tutors/tutor-profile.controller.js';
+import { hostDetailsController } from './hosts/host-details.controller.js';
 
 // Tempo máximo que /health/ready espera pela verificação do banco.
 export const READY_TIMEOUT_MS = 2000;
@@ -59,6 +60,9 @@ app.get('/api/v1/me', meController);
 
 // Conclusão do perfil do Tutor (TSK-04 #275). Ordem: JWT do usuário → leitura do JSON → controller.
 app.put('/api/v1/me/tutor-profile', express.json(), tutorProfileController);
+
+// Detalhes públicos do Host (HSP-PBI-031-TSK-01 #479). Ordem: JWT do usuário → controller (GET, sem body).
+app.get('/api/v1/hosts/:id', hostDetailsController);
 
 // Rota inexistente fora do /api/v1 (dentro dele, sem token, o 401 vem antes): JSON em vez da página HTML do Express.
 app.use((req, res) => {
