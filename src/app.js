@@ -8,6 +8,7 @@ import { meController } from './users/me.controller.js';
 import { tutorProfileController } from './tutors/tutor-profile.controller.js';
 import { requireCanContract } from './middlewares/can-contract.js';
 import { startContractController } from './contracts/contracts.controller.js';
+import { createPetController, listPetsController } from './pets/pet.controller.js';
 
 // Tempo máximo que /health/ready espera pela verificação do banco.
 export const READY_TIMEOUT_MS = 2000;
@@ -65,6 +66,10 @@ app.get('/api/v1/me', meController);
 
 // Conclusão do perfil do Tutor (TSK-04 #275). Ordem: JWT do usuário → leitura do JSON → controller.
 app.put('/api/v1/me/tutor-profile', express.json(), tutorProfileController);
+
+// Pets do Tutor (TSK-04 #369). Ordem: JWT do usuário → leitura do JSON → controller (exige ser Tutor).
+app.post('/api/v1/me/pets', express.json(), createPetController);
+app.get('/api/v1/me/pets', listPetsController);
 
 // Contratação (TSK-05 #263). Ordem: JWT do usuário → conta e perfil aptos → controller (provisório, responde 501).
 for (const path of CONTRACT_PATHS) app.post(path, startContractController);
