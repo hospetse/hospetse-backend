@@ -216,8 +216,9 @@ test('perfil complete passa pela guarda da #263 e incompleto recebe 403 PROFILE_
     await http.put('/api/v1/me/tutor-profile', validBody(randomCpf()), auth);
     for (const route of CONTRACT_ROUTES) {
         const res = await http.post(route, null, auth);
-        assert.strictEqual(res.status, 501, route);
-        assert.strictEqual(res.data.code, 'NOT_IMPLEMENTED');
+        // /reservations já tem controller real (#494): passar pela guarda e chegar nele, sem body, é o 400 da validação
+        const expected = route === '/api/v1/reservations' ? [400, 'VALIDATION_ERROR'] : [501, 'NOT_IMPLEMENTED'];
+        assert.deepStrictEqual([res.status, res.data.code], expected, route);
     }
 });
 

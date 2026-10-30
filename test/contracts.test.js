@@ -59,7 +59,8 @@ test('conta suspensa ou bloqueada: 403 ACCOUNT_RESTRICTED, diferente do perfil i
 });
 
 test('perfil completo passa pela guarda e chega ao controller provisório: 501', async () => {
-    for (const route of ROUTES) {
+    // /reservations já tem controller real (#494): coberto em test/integration/reservations.test.js
+    for (const route of ROUTES.filter((route) => route !== '/api/v1/reservations')) {
         const res = await http.post(route, null, await as('completo'));
         assert.strictEqual(res.status, 501, route);
         assert.strictEqual(res.data.code, 'NOT_IMPLEMENTED');

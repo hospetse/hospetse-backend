@@ -10,6 +10,7 @@ import { hostDetailsController } from './hosts/host-details.controller.js';
 import { requireCanContract } from './middlewares/can-contract.js';
 import { startContractController } from './contracts/contracts.controller.js';
 import { createPetController, listPetsController } from './pets/pet.controller.js';
+import { createReservationController } from './reservations/create-reservation.controller.js';
 
 // Tempo máximo que /health/ready espera pela verificação do banco.
 export const READY_TIMEOUT_MS = 2000;
@@ -76,8 +77,11 @@ app.get('/api/v1/hosts/:id', hostDetailsController);
 app.post('/api/v1/me/pets', express.json(), createPetController);
 app.get('/api/v1/me/pets', listPetsController);
 
+// Solicitação de hospedagem (HSP-PBI-039-TSK-01 #494). Ordem: JWT do usuário → conta e perfil aptos → leitura do JSON → controller.
+app.post('/api/v1/reservations', express.json(), createReservationController);
+
 // Contratação (TSK-05 #263). Ordem: JWT do usuário → conta e perfil aptos → controller (provisório, responde 501).
-for (const path of CONTRACT_PATHS) app.post(path, startContractController);
+for (const path of CONTRACT_PATHS.filter((path) => path !== '/api/v1/reservations')) app.post(path, startContractController);
 
 // Rota inexistente fora do /api/v1 (dentro dele, sem token, o 401 vem antes): JSON em vez da página HTML do Express.
 app.use((req, res) => {
