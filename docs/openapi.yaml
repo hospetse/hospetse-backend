@@ -229,6 +229,76 @@ paths:
         '404': { $ref: '#/components/responses/UserNotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /api/v1/me/pets:
+    post:
+      tags: [Usuário]
+      operationId: createPet
+      summary: Cadastra um pet do Tutor (#369)
+      description: |
+        Exige ser Tutor (perfil concluído pelo `PUT /api/v1/me/tutor-profile`). O pet fica vinculado ao Tutor do `sub` do JWT;
+        um `tutorId` no body é recusado como campo fora do contrato.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PetInput' }
+      responses:
+        '201':
+          description: Pet criado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Pet' }
+        '400':
+          description: Todos os campos inválidos, incluindo valor fora do domínio. Nenhum pet é criado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+              example:
+                code: VALIDATION_ERROR
+                message: Payload inválido
+                details:
+                  - { field: species, message: 'um de: dog, cat' }
+                  - { field: birthDate, message: não pode ser no futuro }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotTutor' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    get:
+      tags: [Usuário]
+      operationId: listPets
+      summary: Lista os pets ativos do Tutor (#369)
+      description: Só os pets do Tutor do `sub` do JWT; nunca de outro Tutor.
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: Página de pets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Pet' }
+                  page: { type: integer }
+                  pageSize: { type: integer }
+                  total: { type: integer, description: Total de pets ativos do Tutor }
+        '400':
+          description: '`page` ou `pageSize` fora do intervalo'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotTutor' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   # Contratação (#263): JWT do usuário → guarda de conta e perfil (só no POST) → controller provisório.
   # shortcut: as três ainda não criam nada e respondem 501 para quem passa pela guarda; a #494 e as tasks de reserva/checkout definem body e sucesso.
   /api/v1/reservations:
@@ -360,6 +430,40 @@ components:
               description: Sigla da UF; gravada em maiúsculas
               example: SP
 
+    PetInput:
+      type: object
+      additionalProperties: false
+      required: [name, species]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255 }
+        species:
+          type: string
+          enum: [dog, cat]
+          description: Lista provisória até a aprovação dos domínios (alinhar com o Host, #110)
+        breed: { type: [string, 'null'], maxLength: 100 }
+        size:
+          type: [string, 'null']
+          enum: [small, medium, large, null]
+        birthDate:
+          type: [string, 'null']
+          format: date
+          description: Data real, não pode ser no futuro
+          example: '2020-03-15'
+        medicalNotes: { type: [string, 'null'], maxLength: 2000 }
+        behavioralNotes: { type: [string, 'null'], maxLength: 2000 }
+
+    Pet:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        species: { type: string, enum: [dog, cat] }
+        breed: { type: [string, 'null'] }
+        size: { type: [string, 'null'], enum: [small, medium, large, null] }
+        birthDate: { type: [string, 'null'], format: date }
+        medicalNotes: { type: [string, 'null'] }
+        behavioralNotes: { type: [string, 'null'] }
+
   responses:
     ValidationError:
       description: Todos os campos inválidos
@@ -381,6 +485,12 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    NotTutor:
+      description: '`PROFILE_INCOMPLETE`: o usuário ainda não é Tutor (perfil não concluído), então não tem pets'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { code: PROFILE_INCOMPLETE, message: Complete seu perfil antes de cadastrar um pet. }
     ContractForbidden:
       description: |
         Não pode contratar. A conta restrita é conferida antes do perfil:

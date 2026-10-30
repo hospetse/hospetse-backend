@@ -254,6 +254,54 @@ Rota usada pela tela "Completar perfil" do app (Task #275, HSP-PBI-002-TSK-04). 
 - \[assunção\] Formato do telefone e do CEP: alinhar com o mobile.
 - Telefone como campo obrigatório do perfil completo: decisão do time, a validar com a PO (a #272 foi removida).
 
+## Pets do Tutor: `POST` e `GET /api/v1/me/pets`
+
+Cadastro e listagem dos pets do Tutor (Task #369, HSP-PBI-016-TSK-04). Só Tutor tem pet: o pet aponta para `tutors.id`, e o TUTOR nasce na conclusão do perfil (`PUT /api/v1/me/tutor-profile`). Antes disso, as duas rotas respondem `403 PROFILE_INCOMPLETE`.
+
+**Autenticação:** igual ao `/me`. O Tutor vem só do `sub` do JWT: um `tutorId` no body é recusado como campo fora do contrato, então ninguém cadastra pet para outro Tutor.
+
+**Body do `POST`:**
+
+```json
+{
+  "name": "Rex",
+  "species": "dog",
+  "breed": "Vira-lata",
+  "size": "medium",
+  "birthDate": "2020-03-15",
+  "medicalNotes": "Alergia a frango",
+  "behavioralNotes": "Medo de fogos"
+}
+```
+
+| Campo | Regra |
+| --- | --- |
+| `name` | Obrigatório, até 255 caracteres |
+| `species` | Obrigatório: `dog` ou `cat` \[provisório\] |
+| `size` | Opcional: `small`, `medium` ou `large` \[provisório\] |
+| `breed` | Opcional, até 100 caracteres |
+| `birthDate` | Opcional, `YYYY-MM-DD`, data real e não futura (a idade é calculada a partir dela) |
+| `medicalNotes`, `behavioralNotes` | Opcionais, texto livre até 2000 caracteres |
+| Outros campos (inclusive `tutorId`) | Recusados com `400` (`não faz parte do contrato`) |
+
+**Respostas:**
+
+| Rota | Status | `code` | Caso |
+| --- | --- | --- | --- |
+| `POST` | `201` | — | Pet criado; devolve o pet (sem o `tutorId`) |
+| `POST` | `400` | `VALIDATION_ERROR` | Todos os campos inválidos ou fora do domínio, em `details`. Nenhum pet é criado |
+| `GET` | `200` | — | `{ items, page, pageSize, total }` com os pets ativos do Tutor |
+| `GET` | `400` | `VALIDATION_ERROR` | `page` menor que 1 ou `pageSize` fora de 1 a 50 |
+| Ambas | `403` | `PROFILE_INCOMPLETE` | O usuário ainda não é Tutor |
+| Ambas | `401` / `404` | `TOKEN_INVALID` / `USER_NOT_FOUND` | Igual ao `/me` |
+
+- A listagem filtra pelo Tutor do token e por `active`: nunca devolve pet de outro Tutor. Padrão `page=1` e `pageSize=20`.
+
+**Pendências:**
+
+- \[provisório\] Listas de espécie e porte só na aplicação (`src/pets/pet-policy.js`): a #366, que fecharia os domínios, foi removida. Alinhar com as espécies e portes aceitos pelo Host (#110) e levar para `CHECK` no banco quando forem aprovadas.
+- Vacinas, alergias e medicações em texto livre (`medicalNotes`); foto e documentos do pet fora desta entrega (#370 removida).
+
 ## Contratação: `POST /api/v1/reservations`, `/service-requests` e `/checkout`
 
 Guarda de contratação por completude do perfil (Task #263, HSP-PBI-001-TSK-05): só quem tem conta ativa e perfil `complete` pode contratar. A regra fica no back-end, então vale mesmo que o app não bloqueie o botão.
@@ -321,6 +369,7 @@ O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, amb
 │   ├── middlewares/    # service-token.js (rota interna), user-token.js (JWT do usuário), can-contract.js (guarda de contratação)
 │   ├── contracts/      # controller e service provisórios das rotas de contratação (respondem 501)
 │   ├── tutors/         # controller e service da conclusão do perfil do Tutor
+│   ├── pets/           # controller, service e domínios (pet-policy.js) dos pets do Tutor
 │   └── users/          # controllers, service e regras do USER (provisionamento, /me e profile-policy.js)
 ├── docs/openapi.yaml   # Contrato OpenAPI 3.1 de todas as rotas
 ├── docs/index.html     # Página do Swagger UI servida em /docs
@@ -345,6 +394,7 @@ O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, amb
 │   └── integration/    # Testes contra o banco real (npm run test:integration)
 │       ├── db.test.js
 │       ├── ready.test.js
+│       ├── pets.test.js # Pets: cadastro, domínio inválido, tutorId de outro, isolamento e paginação
 │       ├── provisioning.test.js # Cadastro: PUT interno (idempotência, conflitos, sem senha, 401) e /me em seguida
 │       ├── tutor-profile.test.js
 │       └── user-token.test.js # JWT válido sem USER
