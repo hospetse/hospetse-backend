@@ -202,7 +202,7 @@ test('titular diferente: cada um só altera o próprio perfil', async () => {
     assert.notStrictEqual(brunoTutor.addressId, anaTutor.addressId);
 });
 
-// Guarda de contratação da #263 com USERs reais. As rotas ainda são provisórias: quem passa pela guarda recebe 501.
+// Guarda de contratação da #263 com USERs reais. /service-requests e /checkout ainda são provisórias: quem passa pela guarda recebe 501.
 const CONTRACT_ROUTES = ['/api/v1/reservations', '/api/v1/service-requests', '/api/v1/checkout'];
 
 test('perfil complete passa pela guarda da #263 e incompleto recebe 403 PROFILE_INCOMPLETE', async () => {

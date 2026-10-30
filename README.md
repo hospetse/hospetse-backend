@@ -360,8 +360,73 @@ Guarda de contratação por completude do perfil (Task #263, HSP-PBI-001-TSK-05)
 
 **Pendências:**
 
-- \[provisório\] `src/contracts/` só existe enquanto as rotas não têm implementação real: responde `501` para quem passa pela guarda. A #494 (PBI-039, solicitação de hospedagem) e as tasks de reserva e checkout trocam o handler pelo controller real, mantendo a guarda e chamando `assertCanContract` no service.
-- Body e resposta de sucesso de cada rota: definidos por essas tasks.
+- \[provisório\] `src/contracts/` só existe enquanto `/service-requests` e `/checkout` não têm implementação real: responde `501` para quem passa pela guarda. As tasks de reserva e checkout trocam o handler pelo controller real, mantendo a guarda e chamando `assertCanContract` no service, como já faz o `/reservations` (#494).
+- Body e resposta de sucesso dessas duas rotas: definidos por essas tasks.
+
+## Solicitação de hospedagem: `POST /api/v1/reservations`
+
+O Tutor solicita hospedagem de um pet num serviço de um Host (Task #494, HSP-PBI-039-TSK-01). Passa pela guarda de contratação acima: só conta ativa com perfil `complete`.
+
+**Header obrigatório:** `Idempotency-Key`, gerado pelo app para cada intenção de solicitar (um UUID, por exemplo) e repetido em toda nova tentativa. Até 100 letras, números, `-` ou `_`.
+
+**Body:**
+
+```json
+{
+  "serviceId": "uuid",
+  "petId": "uuid",
+  "startDate": "2026-11-10",
+  "endDate": "2026-11-13",
+  "notes": "Toma remédio às 8h"
+}
+```
+
+| Campo | Regra |
+| --- | --- |
+| `serviceId` | Serviço ativo de um Host elegível (`hotel`, `active` e `approved`, a mesma regra do `GET /hosts/{id}`). O Host vem do serviço |
+| `petId` | Pet ativo do próprio Tutor. Pet de outro Tutor responde igual ao inexistente |
+| `startDate` | `YYYY-MM-DD`, hoje ou depois (dia em UTC) |
+| `endDate` | `YYYY-MM-DD`, depois de `startDate`. Noites = `endDate` - `startDate` |
+| `notes` | Opcional, até 1000 caracteres |
+| Outros campos (inclusive `tutorId`) | Recusados com `400` (`não faz parte do contrato`) |
+
+**Respostas:**
+
+| Status | `code` | Caso |
+| --- | --- | --- |
+| `201` | — | Solicitação criada no estado `requested` (pendente) |
+| `200` | — | Reenvio com a mesma `Idempotency-Key` e o mesmo body: devolve a mesma solicitação, sem criar outra |
+| `400` | `VALIDATION_ERROR` | Todos os campos inválidos em `details`, incluindo o header, serviço ou pet inexistentes e pet não aceito pelo Host |
+| `403` | `ACCOUNT_RESTRICTED` / `PROFILE_INCOMPLETE` | Guarda de contratação (#263) |
+| `409` | `PERIOD_UNAVAILABLE` | Algum dia do período está bloqueado na agenda do Host (o dia da saída não conta) |
+| `409` | `IDEMPOTENCY_KEY_REUSED` | A mesma chave já foi usada para outra intenção (outro serviço, pet, período ou observação) |
+| `401` / `404` | `TOKEN_INVALID` / `USER_NOT_FOUND` | Igual ao `/me` |
+
+```json
+{
+  "id": "uuid",
+  "status": "requested",
+  "hostId": "uuid",
+  "serviceId": "uuid",
+  "petId": "uuid",
+  "startDate": "2026-11-10",
+  "endDate": "2026-11-13",
+  "dailyPrice": 120.5,
+  "totalValue": 361.5,
+  "notes": "Toma remédio às 8h",
+  "createdAt": "2026-10-30T12:00:00.000Z"
+}
+```
+
+- **Snapshot:** `dailyPrice` e `totalValue` são copiados do serviço no momento da solicitação. Se o Host mudar o preço depois, a solicitação não muda.
+- **Pet aceito:** espécie, porte e raça do pet precisam estar nas listas do Host (`accepted_species`, `accepted_sizes`, `accepted_breeds`). Lista vazia = o Host não restringe.
+- **Idempotência:** a chave fica gravada com `UNIQUE (tutor_id, idempotency_key)`. Dois envios simultâneos com a mesma chave criam uma única solicitação.
+- A regra de contratação também é conferida no service (`assertCanContract`), e a gravação acontece numa transação junto com a checagem da agenda.
+
+**Pendências:**
+
+- \[provisório\] Agenda conferida pela `provider_blocked_dates` atual (um dia por linha). Ajustar se a #482 trocar o modelo do bloqueio.
+- Capacidade do Host: conferida no aceite (#491), não na solicitação.
 
 ## Deploy (Railway)
 
@@ -405,6 +470,7 @@ O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, amb
 │   ├── middlewares/    # service-token.js (rota interna), user-token.js (JWT do usuário), can-contract.js (guarda de contratação)
 │   ├── tutors/         # controller e service da conclusão do perfil do Tutor
 │   ├── pets/           # controller, service e domínios (pet-policy.js) dos pets do Tutor
+│   ├── reservations/   # controller e service da solicitação de hospedagem
 │   └── users/          # controllers, service e regras do USER (provisionamento, /me e profile-policy.js)
 ├── docs/openapi.yaml   # Contrato OpenAPI 3.1 de todas as rotas
 ├── docs/index.html     # Página do Swagger UI servida em /docs
@@ -431,6 +497,7 @@ O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, amb
 │       ├── host-details.test.js # Detalhes públicos do Host: elegível, 404 e dados privados
 │       ├── ready.test.js
 │       ├── pets.test.js # Pets: cadastro, domínio inválido, tutorId de outro, isolamento e paginação
+│       ├── reservations.test.js # Solicitação de hospedagem: snapshot, idempotência, pet aceito e agenda
 │       ├── provisioning.test.js # Cadastro: PUT interno (idempotência, conflitos, sem senha, 401) e /me em seguida
 │       ├── tutor-profile.test.js
 │       └── user-token.test.js # JWT válido sem USER

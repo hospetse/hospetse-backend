@@ -35,7 +35,7 @@ tags:
   - name: Host
     description: Consulta de Hosts pelo Tutor
   - name: Contratação
-    description: Exigem conta ativa e perfil complete (#263). Provisórias até a #494 e as tasks de reserva e checkout
+    description: Exigem conta ativa e perfil complete (#263). service-requests e checkout seguem provisórias até as tasks de reserva e checkout
 
 paths:
   /health:
@@ -333,20 +333,66 @@ paths:
         '404': { $ref: '#/components/responses/UserNotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
-  # Contratação (#263): JWT do usuário → guarda de conta e perfil (só no POST) → controller provisório.
-  # shortcut: as três ainda não criam nada e respondem 501 para quem passa pela guarda; a #494 e as tasks de reserva/checkout definem body e sucesso.
+  # Contratação (#263): JWT do usuário → guarda de conta e perfil (só no POST) → controller.
   /api/v1/reservations:
     post:
       tags: [Contratação]
       operationId: createReservation
-      summary: Inicia uma reserva (guarda da #263; criação provisória)
-      description: A regra também é conferida na camada de service. Consultar (GET) não passa pela guarda.
+      summary: Solicita hospedagem de um pet num serviço de um Host (#494)
+      description: |
+        Cria a solicitação no estado `requested` (pendente, HSP-DEC-004), com o snapshot da diária e do total (diária × noites).
+        O Tutor vem só do `sub` do JWT. O pet precisa ser ativo, do próprio Tutor e aceito pelo Host (espécie, porte e raça;
+        lista vazia no Host = aceita tudo). O serviço precisa estar ativo e ser de um Host elegível (o mesmo filtro do `GET /hosts/{id}`).
+        Reenviar com a mesma `Idempotency-Key` devolve a mesma solicitação (`200`), sem criar outra.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Gerada pelo app para cada intenção de solicitar e repetida nos reenvios. Até 100 letras, números, `-` ou `_`
+          schema: { type: string, pattern: '^[\w-]{1,100}$' }
+          example: 9b2f6c1e-4d3a-4f7b-a1c2-3e4d5f6a7b8c
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReservationInput' }
       responses:
+        '201':
+          description: Solicitação criada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reservation' }
+        '200':
+          description: Reenvio da mesma intenção (mesma chave, mesmo body); devolve a solicitação já criada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reservation' }
+        '400':
+          description: |
+            Todos os campos inválidos, incluindo o header `Idempotency-Key`, serviço ou pet inexistentes e pet não aceito pelo Host.
+            Pet de outro Tutor responde igual ao inexistente. Nada é gravado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+              example:
+                code: VALIDATION_ERROR
+                message: Payload inválido
+                details:
+                  - { field: petId, message: espécie não aceita pelo Host }
+                  - { field: endDate, message: deve ser depois de startDate }
         '401': { $ref: '#/components/responses/TokenInvalid' }
         '403': { $ref: '#/components/responses/ContractForbidden' }
         '404': { $ref: '#/components/responses/UserNotFound' }
+        '409':
+          description: |
+            `PERIOD_UNAVAILABLE`: algum dia do período está bloqueado na agenda do Host (o dia da saída não conta).
+            `IDEMPOTENCY_KEY_REUSED`: a mesma `Idempotency-Key` já foi usada para outra intenção (outro serviço, pet, período ou observação).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '500': { $ref: '#/components/responses/InternalError' }
-        '501': { $ref: '#/components/responses/NotImplemented' }
+
+  # shortcut: service-requests e checkout ainda não criam nada e respondem 501 para quem passa pela guarda; as tasks de reserva/checkout definem body e sucesso.
 
   /api/v1/service-requests:
     post:
@@ -513,6 +559,38 @@ components:
         accepts: { species: [dog, cat], sizes: [small, medium], breeds: [] }
         services: [{ id: 7a0b5c3d-1e2f-4a6b-8c9d-0e1f2a3b4c5d, name: Diária, price: 120 }]
         reputation: { rating: 4.8, reviewCount: 12 }
+
+    ReservationInput:
+      type: object
+      additionalProperties: false
+      required: [serviceId, petId, startDate, endDate]
+      properties:
+        serviceId: { type: string, format: uuid, description: Serviço ativo de um Host elegível; o Host vem dele }
+        petId: { type: string, format: uuid, description: Pet ativo do próprio Tutor }
+        startDate: { type: string, format: date, description: Dia da entrada; hoje ou depois (dia em UTC) }
+        endDate: { type: string, format: date, description: Dia da saída; depois de startDate. Noites = endDate - startDate }
+        notes: { type: [string, 'null'], maxLength: 1000, description: Observações do Tutor para o Host }
+      example:
+        serviceId: 7a0b5c3d-1e2f-4a6b-8c9d-0e1f2a3b4c5d
+        petId: 2c1d0e9f-8a7b-4c6d-9e5f-1a2b3c4d5e6f
+        startDate: '2026-11-10'
+        endDate: '2026-11-13'
+        notes: Toma remédio às 8h
+
+    Reservation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [requested], description: '`requested` = pendente, aguardando o Host' }
+        hostId: { type: string, format: uuid }
+        serviceId: { type: string, format: uuid }
+        petId: { type: string, format: uuid }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        dailyPrice: { type: number, description: Diária no momento da solicitação (snapshot) }
+        totalValue: { type: number, description: dailyPrice × noites (snapshot) }
+        notes: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
 
     PetInput:
       type: object
