@@ -1,4 +1,6 @@
-// Regras do perfil, sem HTTP. canContract também será usado pela TSK-05, para o /me e o bloqueio não divergirem.
+import { AppError } from '../lib/app-error.js';
+
+// Regras do perfil, sem HTTP. O /me (canContract) e a guarda da contratação (TSK-05) usam a mesma regra.
 
 // Campos exigidos para o perfil do Tutor ficar complete (PBI-002). Espera user.tutor.address carregado.
 export function missingFields(user) {
@@ -21,7 +23,24 @@ export function isAdult(birthDate, today = new Date().toISOString().slice(0, 10)
     return `${Number(year) + 18}-${month}-${day}` <= today;
 }
 
+// Motivo do bloqueio da contratação (TSK-05 #263), ou null se pode contratar. Conta restrita vem antes do perfil.
 // pending não bloqueia: todo USER novo nasce assim, com o e-mail já confirmado pelo Auth.
+export function contractDenial(user) {
+    if (['blocked', 'suspended'].includes(user.status)) {
+        return new AppError('Conta bloqueada ou suspensa', 403, 'ACCOUNT_RESTRICTED');
+    }
+    if (user.profileStatus !== 'complete') {
+        return new AppError('Complete seu perfil antes de contratar um serviço.', 403, 'PROFILE_INCOMPLETE');
+    }
+    return null;
+}
+
 export function canContract(user) {
-    return user.profileStatus === 'complete' && !['blocked', 'suspended'].includes(user.status);
+    return !contractDenial(user);
+}
+
+// Camada de service: quem cria a contratação chama isto, para a regra valer mesmo sem o middleware.
+export function assertCanContract(user) {
+    const denial = contractDenial(user);
+    if (denial) throw denial;
 }
