@@ -33,7 +33,7 @@ tags:
   - name: Usuário
     description: Rotas do app, autenticadas pelo JWT do usuário
   - name: Host
-    description: Consulta de Hosts pelo Tutor
+    description: Consulta de Hosts pelo Tutor e rotas do próprio Host
   - name: Contratação
     description: Exigem conta ativa e perfil complete (#263). service-requests e checkout seguem provisórias até as tasks de reserva e checkout
 
@@ -333,6 +333,50 @@ paths:
         '404': { $ref: '#/components/responses/UserNotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  # Rotas do próprio Host: JWT do usuário → controller (exige ser Host).
+  /api/v1/me/host/reservations:
+    get:
+      tags: [Host]
+      operationId: listHostReservations
+      summary: Lista as solicitações pendentes recebidas pelo Host (#485)
+      description: |
+        Só as solicitações dos serviços do Host do `sub` do JWT, da mais antiga para a mais nova.
+        Do Tutor sai só o nome de exibição (LGPD).
+      parameters:
+        - name: status
+          in: query
+          description: Por enquanto só `requested` (pendente)
+          schema: { type: string, enum: [requested], default: requested }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: Página de solicitações; lista vazia quando não há pendentes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/HostReservation' }
+                  page: { type: integer }
+                  pageSize: { type: integer }
+                  total: { type: integer, description: Total de solicitações do Host nesse status }
+        '400':
+          description: '`status`, `page` ou `pageSize` inválidos'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotHost' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   # Contratação (#263): JWT do usuário → guarda de conta e perfil (só no POST) → controller.
   /api/v1/reservations:
     post:
@@ -592,6 +636,33 @@ components:
         notes: { type: [string, 'null'] }
         createdAt: { type: string, format: date-time }
 
+    HostReservation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [requested] }
+        serviceId: { type: string, format: uuid }
+        startDate: { type: string, format: date }
+        endDate: { type: [string, 'null'], format: date }
+        dailyPrice: { type: [number, 'null'], description: Diária no momento da solicitação (snapshot) }
+        totalValue: { type: number, description: Valor total no momento da solicitação (snapshot) }
+        notes: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        tutor:
+          type: object
+          description: Só o nome de exibição; CPF, telefone e e-mail não saem (LGPD)
+          properties:
+            name: { type: string }
+        pet:
+          type: object
+          properties:
+            name: { type: string }
+            species: { type: string }
+            size: { type: [string, 'null'] }
+            breed: { type: [string, 'null'] }
+            medicalNotes: { type: [string, 'null'] }
+            behavioralNotes: { type: [string, 'null'] }
+
     PetInput:
       type: object
       additionalProperties: false
@@ -653,6 +724,12 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
           example: { code: PROFILE_INCOMPLETE, message: Complete seu perfil antes de cadastrar um pet. }
+    NotHost:
+      description: '`HOST_REQUIRED`: o usuário não é Host'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { code: HOST_REQUIRED, message: Apenas Hosts acessam as solicitações recebidas. }
     ContractForbidden:
       description: |
         Não pode contratar. A conta restrita é conferida antes do perfil:

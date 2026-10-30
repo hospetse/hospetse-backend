@@ -428,6 +428,47 @@ O Tutor solicita hospedagem de um pet num serviço de um Host (Task #494, HSP-PB
 - \[provisório\] Agenda conferida pela `provider_blocked_dates` atual (um dia por linha). Ajustar se a #482 trocar o modelo do bloqueio.
 - Capacidade do Host: conferida no aceite (#491), não na solicitação.
 
+## Solicitações recebidas pelo Host: `GET /api/v1/me/host/reservations`
+
+Lista das solicitações pendentes que o Host recebeu, para decidir (Task #485, HSP-PBI-041-TSK-01). A decisão de aceitar ou recusar é a #491.
+
+**Autenticação:** igual ao `/me`. O Host vem só do `sub` do JWT (USER → `providers`); quem não tem linha em `providers` recebe `403 HOST_REQUIRED`. Vale para qualquer situação do Host (pendente, inativo), para ele seguir vendo o que já recebeu.
+
+**Parâmetros:** `status` (só `requested`, o padrão), `page` (a partir de 1, padrão 1) e `pageSize` (1 a 50, padrão 20).
+
+| Status | `code` | Caso |
+| --- | --- | --- |
+| `200` | — | `{ items, page, pageSize, total }`, da solicitação mais antiga para a mais nova; lista vazia quando não há pendentes |
+| `400` | `VALIDATION_ERROR` | `status`, `page` ou `pageSize` inválidos, todos em `details` |
+| `403` | `HOST_REQUIRED` | O usuário não é Host |
+| `401` / `404` | `TOKEN_INVALID` / `USER_NOT_FOUND` | Igual ao `/me` |
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "status": "requested",
+      "serviceId": "uuid",
+      "startDate": "2026-11-10",
+      "endDate": "2026-11-13",
+      "dailyPrice": 120.5,
+      "totalValue": 361.5,
+      "notes": "Toma remédio às 8h",
+      "createdAt": "2026-10-30T12:00:00.000Z",
+      "tutor": { "name": "Ana" },
+      "pet": { "name": "Rex", "species": "dog", "size": "medium", "breed": "Vira-lata", "medicalNotes": null, "behavioralNotes": null }
+    }
+  ],
+  "page": 1,
+  "pageSize": 20,
+  "total": 1
+}
+```
+
+- **Isolamento:** o filtro é pelos serviços do próprio Host (`service.provider_id`), então um Host nunca vê solicitação de outro.
+- **LGPD:** do Tutor sai só o nome de exibição; CPF, telefone, e-mail e endereço não saem.
+
 ## Deploy (Railway)
 
 O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, ambiente `production`): https://backend-production-7298.up.railway.app. URLs e contratos para o Mobile estão na wiki, em Index/Desenvolvimento/Back-end/APIs publicadas - URLs e contratos.
@@ -466,11 +507,11 @@ O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, amb
 │   ├── app.js          # Exporta a aplicação Express e registra as rotas (sem subir servidor)
 │   ├── lib/            # prisma.js (instância única do Prisma Client), app-error.js, jwt.js, cpf.js
 │   ├── contracts/      # controller e service provisórios das rotas de contratação (respondem 501)
-│   ├── hosts/          # controller e service dos detalhes públicos do Host
+│   ├── hosts/          # controller e service dos detalhes públicos do Host e regras do Host (host-policy.js)
 │   ├── middlewares/    # service-token.js (rota interna), user-token.js (JWT do usuário), can-contract.js (guarda de contratação)
 │   ├── tutors/         # controller e service da conclusão do perfil do Tutor
 │   ├── pets/           # controller, service e domínios (pet-policy.js) dos pets do Tutor
-│   ├── reservations/   # controller e service da solicitação de hospedagem
+│   ├── reservations/   # controllers e services da solicitação de hospedagem e da lista do Host
 │   └── users/          # controllers, service e regras do USER (provisionamento, /me e profile-policy.js)
 ├── docs/openapi.yaml   # Contrato OpenAPI 3.1 de todas as rotas
 ├── docs/index.html     # Página do Swagger UI servida em /docs
