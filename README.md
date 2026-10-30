@@ -345,6 +345,7 @@ O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, amb
 │   └── integration/    # Testes contra o banco real (npm run test:integration)
 │       ├── db.test.js
 │       ├── ready.test.js
+│       ├── provisioning.test.js # Cadastro: PUT interno (idempotência, conflitos, sem senha, 401) e /me em seguida
 │       ├── tutor-profile.test.js
 │       └── user-token.test.js # JWT válido sem USER
 ├── .env.example        # Modelo das variáveis de ambiente necessárias
