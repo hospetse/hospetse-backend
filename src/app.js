@@ -12,6 +12,7 @@ import { startContractController } from './contracts/contracts.controller.js';
 import { createPetController, listPetsController } from './pets/pet.controller.js';
 import { createReservationController } from './reservations/create-reservation.controller.js';
 import { listHostReservationsController } from './reservations/list-host-reservations.controller.js';
+import { acceptHostReservationController } from './reservations/decide-host-reservation.controller.js';
 
 // Tempo máximo que /health/ready espera pela verificação do banco.
 export const READY_TIMEOUT_MS = 2000;
@@ -83,6 +84,9 @@ app.post('/api/v1/reservations', express.json(), createReservationController);
 
 // Solicitações recebidas pelo Host (HSP-PBI-041-TSK-01 #485). Ordem: JWT do usuário → controller (exige ser Host).
 app.get('/api/v1/me/host/reservations', listHostReservationsController);
+
+// Decisão do Host sobre a solicitação (HSP-PBI-042-TSK-01 #491). Ordem: JWT do usuário → controller (exige ser Host).
+app.post('/api/v1/me/host/reservations/:id/accept', acceptHostReservationController);
 
 // Contratação (TSK-05 #263). Ordem: JWT do usuário → conta e perfil aptos → controller (provisório, responde 501).
 for (const path of CONTRACT_PATHS.filter((path) => path !== '/api/v1/reservations')) app.post(path, startContractController);
