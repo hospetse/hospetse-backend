@@ -131,6 +131,18 @@ test('dados válidos: 201 com uma solicitação pendente e o snapshot da diária
     assert.strictEqual(saved[0].idempotencyKey, key);
 });
 
+test('Host muda o preço depois: a solicitação gravada mantém a diária e o total do snapshot', async () => {
+    const { pet, token } = await newTutor();
+    const { service } = await newHost();
+
+    const res = await post(validBody(service, pet), { token });
+    await prisma.service.update({ where: { id: service.id }, data: { price: 200 } });
+
+    const saved = await prisma.reservation.findUnique({ where: { id: res.data.id } });
+    assert.strictEqual(Number(saved.dailyPrice), 120.5);
+    assert.strictEqual(Number(saved.totalValue), 361.5);
+});
+
 test('reenvio com a mesma Idempotency-Key: 200 com a mesma solicitação, sem duplicar, mesmo se o preço mudar', async () => {
     const { tutor, pet, token } = await newTutor();
     const { service } = await newHost();
