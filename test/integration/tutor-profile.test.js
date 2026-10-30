@@ -202,5 +202,37 @@ test('titular diferente: cada um só altera o próprio perfil', async () => {
     assert.notStrictEqual(brunoTutor.addressId, anaTutor.addressId);
 });
 
-// shortcut: depende da guarda de contratação da #263 (rotas de reserva ainda não existem); escrever quando ela entrar.
-test.todo('perfil complete passa pela guarda da #263 e incompleto recebe 403 PROFILE_INCOMPLETE');
+// Guarda de contratação da #263 com USERs reais. /service-requests e /checkout ainda são provisórias: quem passa pela guarda recebe 501.
+const CONTRACT_ROUTES = ['/api/v1/reservations', '/api/v1/service-requests', '/api/v1/checkout'];
+
+test('perfil complete passa pela guarda da #263 e incompleto recebe 403 PROFILE_INCOMPLETE', async () => {
+    const { auth } = await newUser();
+    for (const route of CONTRACT_ROUTES) {
+        const res = await http.post(route, null, auth);
+        assert.strictEqual(res.status, 403, route);
+        assert.deepStrictEqual(res.data, { code: 'PROFILE_INCOMPLETE', message: 'Complete seu perfil antes de contratar um serviço.' });
+    }
+
+    await http.put('/api/v1/me/tutor-profile', validBody(randomCpf()), auth);
+    for (const route of CONTRACT_ROUTES) {
+        const res = await http.post(route, null, auth);
+        // /reservations já tem controller real (#494): passar pela guarda e chegar nele, sem body, é o 400 da validação
+        const expected = route === '/api/v1/reservations' ? [400, 'VALIDATION_ERROR'] : [501, 'NOT_IMPLEMENTED'];
+        assert.deepStrictEqual([res.status, res.data.code], expected, route);
+    }
+});
+
+test('conta suspensa com perfil complete: 403 ACCOUNT_RESTRICTED, diferente do perfil incompleto', async () => {
+    const { user, auth } = await newUser();
+    await http.put('/api/v1/me/tutor-profile', validBody(randomCpf()), auth);
+    await prisma.user.update({ where: { id: user.id }, data: { status: 'suspended' } });
+
+    for (const route of CONTRACT_ROUTES) {
+        const res = await http.post(route, null, auth);
+        assert.strictEqual(res.status, 403, route);
+        assert.strictEqual(res.data.code, 'ACCOUNT_RESTRICTED');
+    }
+    const me = await http.get('/api/v1/me', auth);
+    assert.strictEqual(me.status, 200); // navegação continua liberada
+    assert.strictEqual(me.data.permissions.canContract, false);
+});

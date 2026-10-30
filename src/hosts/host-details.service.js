@@ -1,11 +1,12 @@
 import { prisma } from '../lib/prisma.js';
+import { ELIGIBLE_HOST } from './host-policy.js';
 
 // Regra de negócio dos detalhes públicos do Host (GET /api/v1/hosts/:id). Não conhece HTTP.
-// Só Host elegível: hospedagem, ativo e aprovado. Pendente, rejeitado, inativo ou inexistente voltam null (o controller responde 404).
+// Só Host elegível (host-policy.js). Pendente, rejeitado, inativo ou inexistente voltam null (o controller responde 404).
 // O select lista campo a campo o que pode sair (LGPD): CPF/CNPJ, e-mail, telefone e endereço completo nem são lidos do banco.
 export function findPublicHostService(id) {
     return prisma.provider.findFirst({
-        where: { id, providerType: 'hotel', status: 'active', validationStatus: 'approved' },
+        where: { id, ...ELIGIBLE_HOST },
         select: {
             id: true,
             name: true,

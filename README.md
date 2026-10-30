@@ -87,6 +87,7 @@ Tudo sob `/api/v1` é protegido por padrão no `src/app.js` (Task #298): dois `a
 | --- | --- | --- |
 | `/api/v1/internal/*` | Token de serviço do Auth (`requireServiceToken`) | `401 SERVICE_TOKEN_INVALID` |
 | Resto de `/api/v1/*` | JWT do usuário (`requireUser`) | `401 TOKEN_INVALID`; JWT válido sem USER: `404 USER_NOT_FOUND` |
+| `POST` em `/api/v1/reservations`, `/service-requests`, `/checkout` | JWT do usuário + conta e perfil aptos (`requireCanContract`, #263) | `403 ACCOUNT_RESTRICTED` ou `403 PROFILE_INCOMPLETE` (ver [Contratação](#contratação-post-apiv1reservations-service-requests-e-checkout)) |
 | `GET /health`, `GET /health/ready` | Nenhuma (públicas) | — |
 
 - As rotas públicas são só as duas acima. Uma rota pública nova precisa entrar no OpenAPI e na lista `PUBLIC_ROUTES` do `test/auth-guard.test.js`, que percorre todas as rotas registradas e falha se alguma responder sem autenticação.
@@ -287,6 +288,146 @@ Rota usada pelo Tutor para ver um Host antes de solicitar (Task #479, HSP-PBI-03
 - `services`: só os ativos, do mais barato para o mais caro. `accepts.breeds` vazio significa que o Host aceita todas as raças.
 - `reputation.rating` é `null` enquanto o Host não tem avaliações.
 
+## Pets do Tutor: `POST` e `GET /api/v1/me/pets`
+
+Cadastro e listagem dos pets do Tutor (Task #369, HSP-PBI-016-TSK-04). Só Tutor tem pet: o pet aponta para `tutors.id`, e o TUTOR nasce na conclusão do perfil (`PUT /api/v1/me/tutor-profile`). Antes disso, as duas rotas respondem `403 PROFILE_INCOMPLETE`.
+
+**Autenticação:** igual ao `/me`. O Tutor vem só do `sub` do JWT: um `tutorId` no body é recusado como campo fora do contrato, então ninguém cadastra pet para outro Tutor.
+
+**Body do `POST`:**
+
+```json
+{
+  "name": "Rex",
+  "species": "dog",
+  "breed": "Vira-lata",
+  "size": "medium",
+  "birthDate": "2020-03-15",
+  "medicalNotes": "Alergia a frango",
+  "behavioralNotes": "Medo de fogos"
+}
+```
+
+| Campo | Regra |
+| --- | --- |
+| `name` | Obrigatório, até 255 caracteres |
+| `species` | Obrigatório: `dog` ou `cat` \[provisório\] |
+| `size` | Opcional: `small`, `medium` ou `large` \[provisório\] |
+| `breed` | Opcional, até 100 caracteres |
+| `birthDate` | Opcional, `YYYY-MM-DD`, data real e não futura (a idade é calculada a partir dela) |
+| `medicalNotes`, `behavioralNotes` | Opcionais, texto livre até 2000 caracteres |
+| Outros campos (inclusive `tutorId`) | Recusados com `400` (`não faz parte do contrato`) |
+
+**Respostas:**
+
+| Rota | Status | `code` | Caso |
+| --- | --- | --- | --- |
+| `POST` | `201` | — | Pet criado; devolve o pet (sem o `tutorId`) |
+| `POST` | `400` | `VALIDATION_ERROR` | Todos os campos inválidos ou fora do domínio, em `details`. Nenhum pet é criado |
+| `GET` | `200` | — | `{ items, page, pageSize, total }` com os pets ativos do Tutor |
+| `GET` | `400` | `VALIDATION_ERROR` | `page` menor que 1 ou `pageSize` fora de 1 a 50 |
+| Ambas | `403` | `PROFILE_INCOMPLETE` | O usuário ainda não é Tutor |
+| Ambas | `401` / `404` | `TOKEN_INVALID` / `USER_NOT_FOUND` | Igual ao `/me` |
+
+- A listagem filtra pelo Tutor do token e por `active`: nunca devolve pet de outro Tutor. Padrão `page=1` e `pageSize=20`.
+
+**Pendências:**
+
+- \[provisório\] Listas de espécie e porte só na aplicação (`src/pets/pet-policy.js`): a #366, que fecharia os domínios, foi removida. Alinhar com as espécies e portes aceitos pelo Host (#110) e levar para `CHECK` no banco quando forem aprovadas.
+- Vacinas, alergias e medicações em texto livre (`medicalNotes`); foto e documentos do pet fora desta entrega (#370 removida).
+
+## Contratação: `POST /api/v1/reservations`, `/service-requests` e `/checkout`
+
+Guarda de contratação por completude do perfil (Task #263, HSP-PBI-001-TSK-05): só quem tem conta ativa e perfil `complete` pode contratar. A regra fica no back-end, então vale mesmo que o app não bloqueie o botão.
+
+**Ordem no `src/app.js`:** JWT do usuário (`requireUser`, global do `/api/v1`) → guarda de contratação (`requireCanContract`) → controller. A guarda segue o mesmo formato do protegido por padrão: um `app.use` com a lista `CONTRACT_PATHS`, antes das rotas. Uma rota nova sob esses caminhos já nasce com a guarda.
+
+**Respostas:**
+
+| Status | `code` | Caso |
+| --- | --- | --- |
+| `401` | `TOKEN_INVALID` | Igual ao `/me` |
+| `404` | `USER_NOT_FOUND` | Igual ao `/me` |
+| `403` | `ACCOUNT_RESTRICTED` | Conta `blocked` ou `suspended` (conferida antes do perfil) |
+| `403` | `PROFILE_INCOMPLETE` | Perfil que não está `complete`. Mensagem: "Complete seu perfil antes de contratar um serviço." |
+| `501` | `NOT_IMPLEMENTED` | Passou pela guarda, mas a criação ainda não existe (provisório) |
+| `500` | `INTERNAL_ERROR` | Falha inesperada no back-end |
+
+- A regra está em `contractDenial` (`src/users/profile-policy.js`), a mesma que calcula o `canContract` do `/me`: o app e o back-end nunca discordam. Conta `pending` não bloqueia, porque todo USER novo nasce assim.
+- A guarda vale só para o `POST`: consultar ou cancelar o que já existe continua liberado para quem não pode mais contratar.
+- Perfil incompleto continua navegando: `/me` e as rotas de busca não passam pela guarda.
+- A regra também é conferida na camada de service (`assertCanContract`), para valer mesmo se uma rota não tiver a guarda.
+
+**Pendências:**
+
+- \[provisório\] `src/contracts/` só existe enquanto `/service-requests` e `/checkout` não têm implementação real: responde `501` para quem passa pela guarda. As tasks de reserva e checkout trocam o handler pelo controller real, mantendo a guarda e chamando `assertCanContract` no service, como já faz o `/reservations` (#494).
+- Body e resposta de sucesso dessas duas rotas: definidos por essas tasks.
+
+## Solicitação de hospedagem: `POST /api/v1/reservations`
+
+O Tutor solicita hospedagem de um pet num serviço de um Host (Task #494, HSP-PBI-039-TSK-01). Passa pela guarda de contratação acima: só conta ativa com perfil `complete`.
+
+**Header obrigatório:** `Idempotency-Key`, gerado pelo app para cada intenção de solicitar (um UUID, por exemplo) e repetido em toda nova tentativa. Até 100 letras, números, `-` ou `_`.
+
+**Body:**
+
+```json
+{
+  "serviceId": "uuid",
+  "petId": "uuid",
+  "startDate": "2026-11-10",
+  "endDate": "2026-11-13",
+  "notes": "Toma remédio às 8h"
+}
+```
+
+| Campo | Regra |
+| --- | --- |
+| `serviceId` | Serviço ativo de um Host elegível (`hotel`, `active` e `approved`, a mesma regra do `GET /hosts/{id}`). O Host vem do serviço |
+| `petId` | Pet ativo do próprio Tutor. Pet de outro Tutor responde igual ao inexistente |
+| `startDate` | `YYYY-MM-DD`, hoje ou depois (dia em UTC) |
+| `endDate` | `YYYY-MM-DD`, depois de `startDate`. Noites = `endDate` - `startDate` |
+| `notes` | Opcional, até 1000 caracteres |
+| Outros campos (inclusive `tutorId`) | Recusados com `400` (`não faz parte do contrato`) |
+
+**Respostas:**
+
+| Status | `code` | Caso |
+| --- | --- | --- |
+| `201` | — | Solicitação criada no estado `requested` (pendente) |
+| `200` | — | Reenvio com a mesma `Idempotency-Key` e o mesmo body: devolve a mesma solicitação, sem criar outra |
+| `400` | `VALIDATION_ERROR` | Todos os campos inválidos em `details`, incluindo o header, serviço ou pet inexistentes e pet não aceito pelo Host |
+| `403` | `ACCOUNT_RESTRICTED` / `PROFILE_INCOMPLETE` | Guarda de contratação (#263) |
+| `409` | `PERIOD_UNAVAILABLE` | Algum dia do período está bloqueado na agenda do Host (o dia da saída não conta) |
+| `409` | `IDEMPOTENCY_KEY_REUSED` | A mesma chave já foi usada para outra intenção (outro serviço, pet, período ou observação) |
+| `401` / `404` | `TOKEN_INVALID` / `USER_NOT_FOUND` | Igual ao `/me` |
+
+```json
+{
+  "id": "uuid",
+  "status": "requested",
+  "hostId": "uuid",
+  "serviceId": "uuid",
+  "petId": "uuid",
+  "startDate": "2026-11-10",
+  "endDate": "2026-11-13",
+  "dailyPrice": 120.5,
+  "totalValue": 361.5,
+  "notes": "Toma remédio às 8h",
+  "createdAt": "2026-10-30T12:00:00.000Z"
+}
+```
+
+- **Snapshot:** `dailyPrice` e `totalValue` são copiados do serviço no momento da solicitação. Se o Host mudar o preço depois, a solicitação não muda.
+- **Pet aceito:** espécie, porte e raça do pet precisam estar nas listas do Host (`accepted_species`, `accepted_sizes`, `accepted_breeds`). Lista vazia = o Host não restringe.
+- **Idempotência:** a chave fica gravada com `UNIQUE (tutor_id, idempotency_key)`. Dois envios simultâneos com a mesma chave criam uma única solicitação.
+- A regra de contratação também é conferida no service (`assertCanContract`), e a gravação acontece numa transação junto com a checagem da agenda.
+
+**Pendências:**
+
+- \[provisório\] Agenda conferida pela `provider_blocked_dates` atual (um dia por linha). Ajustar se a #482 trocar o modelo do bloqueio.
+- Capacidade do Host: conferida no aceite (#491), não na solicitação.
+
 ## Deploy (Railway)
 
 O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, ambiente `production`): https://backend-production-7298.up.railway.app. URLs e contratos para o Mobile estão na wiki, em Index/Desenvolvimento/Back-end/APIs publicadas - URLs e contratos.
@@ -324,9 +465,12 @@ O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, amb
 ├── src/
 │   ├── app.js          # Exporta a aplicação Express e registra as rotas (sem subir servidor)
 │   ├── lib/            # prisma.js (instância única do Prisma Client), app-error.js, jwt.js, cpf.js
+│   ├── contracts/      # controller e service provisórios das rotas de contratação (respondem 501)
 │   ├── hosts/          # controller e service dos detalhes públicos do Host
-│   ├── middlewares/    # service-token.js (rota interna), user-token.js (JWT do usuário)
+│   ├── middlewares/    # service-token.js (rota interna), user-token.js (JWT do usuário), can-contract.js (guarda de contratação)
 │   ├── tutors/         # controller e service da conclusão do perfil do Tutor
+│   ├── pets/           # controller, service e domínios (pet-policy.js) dos pets do Tutor
+│   ├── reservations/   # controller e service da solicitação de hospedagem
 │   └── users/          # controllers, service e regras do USER (provisionamento, /me e profile-policy.js)
 ├── docs/openapi.yaml   # Contrato OpenAPI 3.1 de todas as rotas
 ├── docs/index.html     # Página do Swagger UI servida em /docs
@@ -344,13 +488,17 @@ O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, amb
 │   ├── health.test.js  # /health sem banco
 │   ├── auth-guard.test.js # Proteção das rotas: inventário, tokens inválidos, 404/400/500 em JSON
 │   ├── cpf.test.js     # Validação de CPF
-│   ├── profile-policy.test.js # Regra de completude e idade mínima
+│   ├── profile-policy.test.js # Regra de completude, idade mínima e regra de contratação
+│   ├── contracts.test.js # Guarda de contratação: 403, 501 e só o POST (USERs simulados, sem banco)
 │   ├── smoke/
 │   │   └── smoke-db.js # Smoke check do banco (npm run smoke:db)
 │   └── integration/    # Testes contra o banco real (npm run test:integration)
 │       ├── db.test.js
 │       ├── host-details.test.js # Detalhes públicos do Host: elegível, 404 e dados privados
 │       ├── ready.test.js
+│       ├── pets.test.js # Pets: cadastro, domínio inválido, tutorId de outro, isolamento e paginação
+│       ├── reservations.test.js # Solicitação de hospedagem: snapshot, idempotência, pet aceito e agenda
+│       ├── provisioning.test.js # Cadastro: PUT interno (idempotência, conflitos, sem senha, 401) e /me em seguida
 │       ├── tutor-profile.test.js
 │       └── user-token.test.js # JWT válido sem USER
 ├── .env.example        # Modelo das variáveis de ambiente necessárias
