@@ -81,6 +81,16 @@ test('rota interna não aceita o JWT do usuário no lugar do token de serviço',
     assert.strictEqual(res.data.code, 'SERVICE_TOKEN_INVALID');
 });
 
+test('rota interna com maiúsculas ou sem / no fim: só o token de serviço é exigido, como em minúsculas', async () => {
+    const service = bearer('token-de-servico-de-teste');
+    // body vazio para na validação do controller (400), antes de chegar no banco
+    const upper = await http.put('/api/v1/INTERNAL/users/x', {}, service);
+    assert.strictEqual(upper.status, 400);
+    assert.strictEqual(upper.data.code, 'VALIDATION_ERROR');
+    const noSlash = await http.get('/api/v1/internal', service);
+    assert.strictEqual(noSlash.status, 404);
+});
+
 test('JSON malformado: 400 em JSON, não a página HTML do Express', async () => {
     const res = await http.put('/api/v1/internal/users/x', '{"email":', {
         headers: { Authorization: 'Bearer token-de-servico-de-teste', 'Content-Type': 'application/json' },

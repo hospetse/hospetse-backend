@@ -6,6 +6,7 @@ import { provisionUserController } from './users/internal-users.controller.js';
 import { requireUser } from './middlewares/user-token.js';
 import { meController } from './users/me.controller.js';
 import { tutorProfileController } from './tutors/tutor-profile.controller.js';
+import { hostDetailsController } from './hosts/host-details.controller.js';
 
 // Tempo máximo que /health/ready espera pela verificação do banco.
 export const READY_TIMEOUT_MS = 2000;
@@ -47,8 +48,9 @@ app.get('/docs/openapi.yaml', (req, res) => res.type('text/yaml').sendFile('open
 
 // Protegido por padrão (TSK-04 #298): tudo sob /api/v1 exige autenticação antes de chegar na rota,
 // então uma rota nova já nasce protegida. As internas usam o token de serviço do Auth; o resto, o JWT do usuário.
-app.use('/api/v1/internal', requireServiceToken);
-app.use('/api/v1', (req, res, next) => (req.path.startsWith('/internal/') ? next() : requireUser(req, res, next)));
+// Um middleware só decide o token: o regex casa /internal como as rotas do Express (sem diferenciar maiúsculas, com ou sem / no fim).
+app.use('/api/v1', (req, res, next) =>
+    (/^\/internal(\/|$)/i.test(req.path) ? requireServiceToken(req, res, next) : requireUser(req, res, next)));
 
 // Provisionamento do USER pelo Auth Server (TSK-01 #259). Ordem: token de serviço → leitura do JSON → controller.
 app.put('/api/v1/internal/users/:authUserId', express.json(), provisionUserController);
@@ -58,6 +60,9 @@ app.get('/api/v1/me', meController);
 
 // Conclusão do perfil do Tutor (TSK-04 #275). Ordem: JWT do usuário → leitura do JSON → controller.
 app.put('/api/v1/me/tutor-profile', express.json(), tutorProfileController);
+
+// Detalhes públicos do Host (HSP-PBI-031-TSK-01 #479). Ordem: JWT do usuário → controller (GET, sem body).
+app.get('/api/v1/hosts/:id', hostDetailsController);
 
 // Rota inexistente fora do /api/v1 (dentro dele, sem token, o 401 vem antes): JSON em vez da página HTML do Express.
 app.use((req, res) => {

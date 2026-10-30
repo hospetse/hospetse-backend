@@ -253,6 +253,40 @@ Rota usada pela tela "Completar perfil" do app (Task #275, HSP-PBI-002-TSK-04). 
 - \[assunção\] Formato do telefone e do CEP: alinhar com o mobile.
 - Telefone como campo obrigatório do perfil completo: decisão do time, a validar com a PO (a #272 foi removida).
 
+## Detalhes públicos do Host: `GET /api/v1/hosts/{id}`
+
+Rota usada pelo Tutor para ver um Host antes de solicitar (Task #479, HSP-PBI-031-TSK-01).
+
+**Autenticação:** igual ao `/me`. Qualquer usuário autenticado pode consultar.
+
+**Host elegível:** `provider_type = hotel`, `status = active` e `validation_status = approved`.
+
+| Status | `code` | Caso | Body |
+| --- | --- | --- | --- |
+| `200` | — | Host elegível | ver abaixo |
+| `401` | `TOKEN_INVALID` | Igual ao `/me` | `{ "code", "message" }` |
+| `404` | `NOT_FOUND` | Host inexistente, pendente, rejeitado, inativo ou `id` fora do formato UUID | `{ "code", "message" }` |
+| `404` | `USER_NOT_FOUND` | Igual ao `/me` | `{ "code", "message" }` |
+
+```json
+{
+  "id": "uuid",
+  "name": "Hotelzinho da Ana",
+  "description": "Casa com quintal",
+  "pictureUrl": "https://exemplo.com/perfil.jpg",
+  "location": { "city": "São Paulo", "neighborhood": "Pinheiros" },
+  "photos": ["https://exemplo.com/1.jpg"],
+  "accepts": { "species": ["dog", "cat"], "sizes": ["small", "medium"], "breeds": [] },
+  "services": [{ "id": "uuid", "name": "Diária", "price": 120.5 }],
+  "reputation": { "rating": 4.8, "reviewCount": 12 }
+}
+```
+
+- O mesmo `404` para todos os casos não elegíveis: a resposta não revela que um Host pendente ou inativo existe.
+- O service lê do banco só os campos públicos (`select` campo a campo). CPF/CNPJ, e-mail, telefone, rua, número e CEP nunca saem (LGPD).
+- `services`: só os ativos, do mais barato para o mais caro. `accepts.breeds` vazio significa que o Host aceita todas as raças.
+- `reputation.rating` é `null` enquanto o Host não tem avaliações.
+
 ## Deploy (Railway)
 
 O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, ambiente `production`): https://backend-production-7298.up.railway.app. URLs e contratos para o Mobile estão na wiki, em Index/Desenvolvimento/Back-end/APIs publicadas - URLs e contratos.
@@ -290,6 +324,7 @@ O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, amb
 ├── src/
 │   ├── app.js          # Exporta a aplicação Express e registra as rotas (sem subir servidor)
 │   ├── lib/            # prisma.js (instância única do Prisma Client), app-error.js, jwt.js, cpf.js
+│   ├── hosts/          # controller e service dos detalhes públicos do Host
 │   ├── middlewares/    # service-token.js (rota interna), user-token.js (JWT do usuário)
 │   ├── tutors/         # controller e service da conclusão do perfil do Tutor
 │   └── users/          # controllers, service e regras do USER (provisionamento, /me e profile-policy.js)
@@ -314,6 +349,7 @@ O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, amb
 │   │   └── smoke-db.js # Smoke check do banco (npm run smoke:db)
 │   └── integration/    # Testes contra o banco real (npm run test:integration)
 │       ├── db.test.js
+│       ├── host-details.test.js # Detalhes públicos do Host: elegível, 404 e dados privados
 │       ├── ready.test.js
 │       ├── tutor-profile.test.js
 │       └── user-token.test.js # JWT válido sem USER
