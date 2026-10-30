@@ -32,6 +32,8 @@ tags:
     description: Chamadas só pelo Auth Server
   - name: Usuário
     description: Rotas do app, autenticadas pelo JWT do usuário
+  - name: Host
+    description: Consulta de Hosts pelo Tutor
 
 paths:
   /health:
@@ -227,6 +229,38 @@ paths:
         '404': { $ref: '#/components/responses/UserNotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /api/v1/hosts/{id}:
+    get:
+      tags: [Host]
+      operationId: getHostDetails
+      summary: Detalhes públicos de um Host (#479)
+      description: |
+        Dados que o Tutor vê antes de solicitar. Só Host elegível: `provider_type` hotel, `status` active e `validation_status` approved.
+        Documentos, CPF/CNPJ, e-mail, telefone e endereço completo nunca aparecem (LGPD).
+      security:
+        - userJwt: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Host elegível
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostDetails' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404':
+          description: |
+            `NOT_FOUND`: Host inexistente, pendente, rejeitado, inativo ou id fora do formato UUID. A mesma resposta para todos,
+            para não revelar que o Host existe. Também `USER_NOT_FOUND`, quando o token é válido mas não há USER.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { code: NOT_FOUND, message: Host não encontrado }
+        '500': { $ref: '#/components/responses/InternalError' }
+
 components:
   securitySchemes:
     userJwt:
@@ -316,6 +350,56 @@ components:
               pattern: '^[A-Za-z]{2}$'
               description: Sigla da UF; gravada em maiúsculas
               example: SP
+
+    HostDetails:
+      type: object
+      required: [id, name, description, pictureUrl, location, photos, accepts, services, reputation]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, description: Nome de exibição }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        pictureUrl: { type: [string, 'null'], description: Foto de perfil }
+        location:
+          type: object
+          description: Só cidade e bairro; nunca rua, número ou CEP
+          properties:
+            city: { type: [string, 'null'] }
+            neighborhood: { type: [string, 'null'] }
+        photos:
+          type: array
+          description: URLs das fotos, da mais antiga para a mais nova
+          items: { type: string }
+        accepts:
+          type: object
+          description: Mesmos valores de espécie, porte e raça do pet. `breeds` vazio = aceita todas as raças
+          properties:
+            species: { type: array, items: { type: string } }
+            sizes: { type: array, items: { type: string } }
+            breeds: { type: array, items: { type: string } }
+        services:
+          type: array
+          description: Serviços ativos, do mais barato para o mais caro
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+              price: { type: number, description: Preço vigente em reais }
+        reputation:
+          type: object
+          properties:
+            rating: { type: [number, 'null'], minimum: 0, maximum: 5, description: '`null` sem avaliações' }
+            reviewCount: { type: integer }
+      example:
+        id: 3f1c2a9e-6b1d-4c3e-9a51-2f0f6d1b7c11
+        name: Hotelzinho da Ana
+        description: Casa com quintal, aceito pets de pequeno e médio porte.
+        pictureUrl: https://exemplo.com/fotos/perfil.jpg
+        location: { city: São Paulo, neighborhood: Pinheiros }
+        photos: ['https://exemplo.com/fotos/1.jpg']
+        accepts: { species: [dog, cat], sizes: [small, medium], breeds: [] }
+        services: [{ id: 7a0b5c3d-1e2f-4a6b-8c9d-0e1f2a3b4c5d, name: Diária, price: 120 }]
+        reputation: { rating: 4.8, reviewCount: 12 }
 
   responses:
     ValidationError:
