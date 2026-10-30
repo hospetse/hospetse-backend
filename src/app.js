@@ -47,8 +47,9 @@ app.get('/docs/openapi.yaml', (req, res) => res.type('text/yaml').sendFile('open
 
 // Protegido por padrão (TSK-04 #298): tudo sob /api/v1 exige autenticação antes de chegar na rota,
 // então uma rota nova já nasce protegida. As internas usam o token de serviço do Auth; o resto, o JWT do usuário.
-app.use('/api/v1/internal', requireServiceToken);
-app.use('/api/v1', (req, res, next) => (req.path.startsWith('/internal/') ? next() : requireUser(req, res, next)));
+// Um middleware só decide o token: o regex casa /internal como as rotas do Express (sem diferenciar maiúsculas, com ou sem / no fim).
+app.use('/api/v1', (req, res, next) =>
+    (/^\/internal(\/|$)/i.test(req.path) ? requireServiceToken(req, res, next) : requireUser(req, res, next)));
 
 // Provisionamento do USER pelo Auth Server (TSK-01 #259). Ordem: token de serviço → leitura do JSON → controller.
 app.put('/api/v1/internal/users/:authUserId', express.json(), provisionUserController);
