@@ -11,7 +11,7 @@ const DECISION_FIELDS = { id: true, status: true, decidedAt: true, rejectionReas
 async function findOwnReservation(tx, hostId, id) {
     const reservation = await tx.reservation.findFirst({
         where: { id, service: { providerId: hostId } },
-        select: { id: true, status: true, startDate: true, endDate: true },
+        select: { id: true, status: true, startDate: true, endDate: true, tutor: { select: { userId: true } } },
     });
     if (!reservation) throw new AppError('Solicitação não encontrada', 404, 'NOT_FOUND');
     return reservation;
@@ -52,5 +52,23 @@ export function acceptHostReservationService(host, id) {
         if (occupied >= capacity) throw new AppError('Sem vaga no período', 409, 'NO_CAPACITY');
 
         return decide(tx, id, { status: 'awaiting_payment' });
+    });
+}
+
+// Recusa pelo Host (POST /api/v1/me/host/reservations/:id/reject, #491): vai para rejected com o motivo e registra o evento
+// de notificação ao Tutor na mesma transação. A entrega da notificação é da FT-026.
+export function rejectHostReservationService(host, id, reason) {
+    return prisma.$transaction(async (tx) => {
+        const reservation = await findOwnReservation(tx, host.id, id);
+        const decided = await decide(tx, id, { status: 'rejected', rejectionReason: reason });
+        await tx.notification.create({
+            data: {
+                userId: reservation.tutor.userId,
+                type: 'reservation_rejected',
+                // JSON para a entrega (FT-026) montar o texto e o link da solicitação
+                content: JSON.stringify({ reservationId: id, reason }),
+            },
+        });
+        return decided;
     });
 }
