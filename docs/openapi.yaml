@@ -377,6 +377,77 @@ paths:
         '404': { $ref: '#/components/responses/UserNotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /api/v1/me/host/reservations/{id}/accept:
+    post:
+      tags: [Host]
+      operationId: acceptHostReservation
+      summary: Aceita uma solicitação pendente (#491)
+      description: |
+        Vai para `awaiting_payment` (aguardando o pagamento do Tutor, HSP-DEC-004) se ainda houver vaga no período.
+        Ocupam vaga as reservas do Host em `awaiting_payment`, `accepted` ou `checked_in` que cruzam o período (o dia da saída não conta).
+        Host sem capacidade cadastrada atende um pet por vez [provisório].
+      parameters:
+        - $ref: '#/components/parameters/ReservationId'
+      responses:
+        '200':
+          description: Solicitação aceita
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReservationDecision' }
+              example: { id: 6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f, status: awaiting_payment, decidedAt: '2026-10-30T12:00:00.000Z', rejectionReason: null }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotHost' }
+        '404': { $ref: '#/components/responses/ReservationNotFound' }
+        '409':
+          description: |
+            `RESERVATION_ALREADY_DECIDED`: já aceita ou recusada, inclusive quando outra decisão chegou antes ao mesmo tempo.
+            `NO_CAPACITY`: sem vaga no período.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/me/host/reservations/{id}/reject:
+    post:
+      tags: [Host]
+      operationId: rejectHostReservation
+      summary: Recusa uma solicitação pendente com motivo (#491)
+      description: Vai para `rejected` e registra o evento `reservation_rejected` para o Tutor na mesma transação (entrega pela FT-026).
+      parameters:
+        - $ref: '#/components/parameters/ReservationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+            example: { reason: Lotado no feriado }
+      responses:
+        '200':
+          description: Solicitação recusada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReservationDecision' }
+              example: { id: 6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f, status: rejected, decidedAt: '2026-10-30T12:00:00.000Z', rejectionReason: Lotado no feriado }
+        '400':
+          description: '`reason` ausente, vazio ou com mais de 500 caracteres, ou campo fora do contrato'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotHost' }
+        '404': { $ref: '#/components/responses/ReservationNotFound' }
+        '409':
+          description: '`RESERVATION_ALREADY_DECIDED`: já aceita ou recusada'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   # Contratação (#263): JWT do usuário → guarda de conta e perfil (só no POST) → controller.
   /api/v1/reservations:
     post:
@@ -663,6 +734,14 @@ components:
             medicalNotes: { type: [string, 'null'] }
             behavioralNotes: { type: [string, 'null'] }
 
+    ReservationDecision:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [awaiting_payment, rejected] }
+        decidedAt: { type: string, format: date-time }
+        rejectionReason: { type: [string, 'null'] }
+
     PetInput:
       type: object
       additionalProperties: false
@@ -697,6 +776,14 @@ components:
         medicalNotes: { type: [string, 'null'] }
         behavioralNotes: { type: [string, 'null'] }
 
+  parameters:
+    ReservationId:
+      name: id
+      in: path
+      required: true
+      description: Id da solicitação; texto que não é UUID responde 404
+      schema: { type: string, format: uuid }
+
   responses:
     ValidationError:
       description: Todos os campos inválidos
@@ -730,6 +817,12 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
           example: { code: HOST_REQUIRED, message: Apenas Hosts acessam as solicitações recebidas. }
+    ReservationNotFound:
+      description: '`NOT_FOUND`: solicitação inexistente ou de outro Host (mesma resposta, para não revelar que existe)'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { code: NOT_FOUND, message: Solicitação não encontrada }
     ContractForbidden:
       description: |
         Não pode contratar. A conta restrita é conferida antes do perfil:

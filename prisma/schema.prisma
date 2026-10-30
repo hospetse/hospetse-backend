@@ -242,31 +242,34 @@ model WalkSlot {
 }
 
 model Reservation {
-  id             String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  petId          String               @map("pet_id") @db.Uuid
-  tutorId        String               @map("tutor_id") @db.Uuid
-  serviceId      String               @map("service_id") @db.Uuid
-  walkSlotId     String?              @map("walk_slot_id") @db.Uuid
-  status         String               @default("requested") @db.VarChar(20)
-  startDate      DateTime             @map("start_date") @db.Timestamptz(3)
-  endDate        DateTime?            @map("end_date") @db.Timestamptz(3)
-  createdDate    DateTime             @default(now()) @map("created_date") @db.Timestamptz(3)
-  totalValue     Decimal              @map("total_value") @db.Decimal(10, 2)
+  id              String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  petId           String               @map("pet_id") @db.Uuid
+  tutorId         String               @map("tutor_id") @db.Uuid
+  serviceId       String               @map("service_id") @db.Uuid
+  walkSlotId      String?              @map("walk_slot_id") @db.Uuid
+  // requested, awaiting_payment (aceita pelo Host, #491), accepted, rejected, checked_in, checked_out, cancelled ou completed
+  status          String               @default("requested") @db.VarChar(20)
+  rejectionReason String?              @map("rejection_reason") @db.VarChar(500)
+  decidedAt       DateTime?            @map("decided_at") @db.Timestamptz(3)
+  startDate       DateTime             @map("start_date") @db.Timestamptz(3)
+  endDate         DateTime?            @map("end_date") @db.Timestamptz(3)
+  createdDate     DateTime             @default(now()) @map("created_date") @db.Timestamptz(3)
+  totalValue      Decimal              @map("total_value") @db.Decimal(10, 2)
   // Snapshot da diária no momento da solicitação (#494): mudar o preço do serviço depois não altera a solicitação
-  dailyPrice     Decimal?             @map("daily_price") @db.Decimal(10, 2)
-  notes          String?              @db.VarChar(1000)
+  dailyPrice      Decimal?             @map("daily_price") @db.Decimal(10, 2)
+  notes           String?              @db.VarChar(1000)
   // Header Idempotency-Key (#494): o reenvio da mesma intenção devolve a solicitação já criada
-  idempotencyKey String?              @map("idempotency_key") @db.VarChar(100)
-  pet            Pet                  @relation(fields: [petId], references: [id])
-  tutor          Tutor                @relation(fields: [tutorId], references: [id])
-  service        Service              @relation(fields: [serviceId], references: [id])
-  walkSlot       WalkSlot?            @relation(fields: [walkSlotId], references: [id])
-  activityLogs   PetActivityLog[]
-  review         Review?
-  transactions   PaymentTransaction[]
-  couponUsages   CouponUsage[]
-  conversations  Conversation[]
-  updatedAt      DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  idempotencyKey  String?              @map("idempotency_key") @db.VarChar(100)
+  pet             Pet                  @relation(fields: [petId], references: [id])
+  tutor           Tutor                @relation(fields: [tutorId], references: [id])
+  service         Service              @relation(fields: [serviceId], references: [id])
+  walkSlot        WalkSlot?            @relation(fields: [walkSlotId], references: [id])
+  activityLogs    PetActivityLog[]
+  review          Review?
+  transactions    PaymentTransaction[]
+  couponUsages    CouponUsage[]
+  conversations   Conversation[]
+  updatedAt       DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@unique([tutorId, idempotencyKey])
   @@index([petId])

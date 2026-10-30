@@ -469,6 +469,32 @@ Lista das solicitações pendentes que o Host recebeu, para decidir (Task #485, 
 - **Isolamento:** o filtro é pelos serviços do próprio Host (`service.provider_id`), então um Host nunca vê solicitação de outro.
 - **LGPD:** do Tutor sai só o nome de exibição; CPF, telefone, e-mail e endereço não saem.
 
+## Decisão do Host: `POST /api/v1/me/host/reservations/{id}/accept` e `/reject`
+
+Aceite e recusa de uma solicitação pendente pelo Host (Task #491, HSP-PBI-042-TSK-01). Autenticação e papel iguais à lista do Host: quem não é Host recebe `403 HOST_REQUIRED`.
+
+- **Aceitar** (sem body): vai para `awaiting_payment` (aguardando o pagamento do Tutor, HSP-DEC-004) se ainda houver vaga no período.
+- **Recusar** (body `{ "reason": "..." }`, obrigatório, até 500 caracteres): vai para `rejected` com o motivo e registra o evento `reservation_rejected` para o Tutor em `notifications`, na mesma transação. A entrega é da FT-026.
+
+| Status | `code` | Caso |
+| --- | --- | --- |
+| `200` | — | `{ id, status, decidedAt, rejectionReason }` |
+| `400` | `VALIDATION_ERROR` | Recusa sem `reason`, com mais de 500 caracteres ou com campo fora do contrato |
+| `403` | `HOST_REQUIRED` | O usuário não é Host |
+| `404` | `NOT_FOUND` | Solicitação inexistente ou de outro Host (mesma resposta, para não revelar que existe) |
+| `409` | `RESERVATION_ALREADY_DECIDED` | Já aceita ou recusada, inclusive quando outra decisão chegou antes ao mesmo tempo |
+| `409` | `NO_CAPACITY` | Aceite sem vaga no período |
+| `401` / `404` | `TOKEN_INVALID` / `USER_NOT_FOUND` | Igual ao `/me` |
+
+- **Decisão única:** o status só muda com `WHERE status = 'requested'`. Com duas decisões ao mesmo tempo, o banco deixa só uma alterar a linha; a outra recebe `409` e nada dela fica gravado (nem a notificação).
+- **Capacidade:** ocupam vaga as reservas do Host em `awaiting_payment`, `accepted` ou `checked_in` que cruzam o período (o dia da saída não conta). O limite é `hotel_details.capacity`. A linha do Host fica travada (`SELECT ... FOR UPDATE`) durante o aceite, então dois aceites ao mesmo tempo andam em fila e o segundo já conta a vaga do primeiro.
+
+**Pendências:**
+
+- \[provisório\] Ocupação calculada pelas reservas: a agenda da #482 (HSP-PBI-036) não é MVP. Trocar pela agenda se ela entrar.
+- \[provisório\] Host sem capacidade cadastrada atende um pet por vez. Exigir a capacidade no cadastro do Host.
+- Sem prazo de expiração da solicitação (TBD na HSP-PBI-042).
+
 ## Deploy (Railway)
 
 O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, ambiente `production`): https://backend-production-7298.up.railway.app. URLs e contratos para o Mobile estão na wiki, em Index/Desenvolvimento/Back-end/APIs publicadas - URLs e contratos.
@@ -511,7 +537,7 @@ O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, amb
 │   ├── middlewares/    # service-token.js (rota interna), user-token.js (JWT do usuário), can-contract.js (guarda de contratação)
 │   ├── tutors/         # controller e service da conclusão do perfil do Tutor
 │   ├── pets/           # controller, service e domínios (pet-policy.js) dos pets do Tutor
-│   ├── reservations/   # controllers e services da solicitação de hospedagem e da lista do Host
+│   ├── reservations/   # controllers e services da solicitação de hospedagem, da lista e da decisão do Host
 │   └── users/          # controllers, service e regras do USER (provisionamento, /me e profile-policy.js)
 ├── docs/openapi.yaml   # Contrato OpenAPI 3.1 de todas as rotas
 ├── docs/index.html     # Página do Swagger UI servida em /docs
