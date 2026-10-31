@@ -399,6 +399,8 @@ O Tutor solicita hospedagem de um pet num serviço de um Host (Task #494, HSP-PB
 | `400` | `VALIDATION_ERROR` | Todos os campos inválidos em `details`, incluindo o header, serviço ou pet inexistentes e pet não aceito pelo Host |
 | `403` | `ACCOUNT_RESTRICTED` / `PROFILE_INCOMPLETE` | Guarda de contratação (#263) |
 | `409` | `PERIOD_UNAVAILABLE` | Algum dia do período está bloqueado na agenda do Host (o dia da saída não conta) |
+| `409` | `NO_CAPACITY` | Algum dia do período já está com todas as vagas do Host ocupadas por reservas aguardando pagamento, aceitas ou em andamento (#488) |
+| `409` | `PET_ALREADY_BOOKED` | O pet já tem hospedagem que ocupa algum dia do período, com este ou outro Host. Solicitação só pendente não conta (#488) |
 | `409` | `IDEMPOTENCY_KEY_REUSED` | A mesma chave já foi usada para outra intenção (outro serviço, pet, período ou observação) |
 | `401` / `404` | `TOKEN_INVALID` / `USER_NOT_FOUND` | Igual ao `/me` |
 
@@ -483,7 +485,8 @@ Aceite e recusa de uma solicitação pendente pelo Host (Task #491, HSP-PBI-042-
 | `403` | `HOST_REQUIRED` | O usuário não é Host |
 | `404` | `NOT_FOUND` | Solicitação inexistente ou de outro Host (mesma resposta, para não revelar que existe) |
 | `409` | `RESERVATION_ALREADY_DECIDED` | Já aceita ou recusada, inclusive quando outra decisão chegou antes ao mesmo tempo |
-| `409` | `NO_CAPACITY` | Aceite sem vaga no período |
+| `409` | `NO_CAPACITY` | Aceite sem vaga em algum dia do período (a ocupação é contada dia a dia) |
+| `409` | `PET_ALREADY_BOOKED` | O pet já foi aceito por outro Host num período que se cruza com este (#488) |
 | `401` / `404` | `TOKEN_INVALID` / `USER_NOT_FOUND` | Igual ao `/me` |
 
 - **Decisão única:** o status só muda com `WHERE status = 'requested'`. Com duas decisões ao mesmo tempo, o banco deixa só uma alterar a linha; a outra recebe `409` e nada dela fica gravado (nem a notificação).

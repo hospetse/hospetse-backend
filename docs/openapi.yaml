@@ -401,7 +401,8 @@ paths:
         '409':
           description: |
             `RESERVATION_ALREADY_DECIDED`: já aceita ou recusada, inclusive quando outra decisão chegou antes ao mesmo tempo.
-            `NO_CAPACITY`: sem vaga no período.
+            `NO_CAPACITY`: algum dia do período já está com todas as vagas do Host ocupadas (a ocupação é contada dia a dia).
+            `PET_ALREADY_BOOKED`: o pet já foi aceito por outro Host num período que se cruza com este.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -501,6 +502,8 @@ paths:
         '409':
           description: |
             `PERIOD_UNAVAILABLE`: algum dia do período está bloqueado na agenda do Host (o dia da saída não conta).
+            `NO_CAPACITY`: algum dia do período já está com todas as vagas do Host ocupadas por reservas aguardando pagamento, aceitas ou em andamento.
+            `PET_ALREADY_BOOKED`: o pet já tem hospedagem que ocupa algum dia do período, com este ou outro Host.
             `IDEMPOTENCY_KEY_REUSED`: a mesma `Idempotency-Key` já foi usada para outra intenção (outro serviço, pet, período ou observação).
           content:
             application/json:
