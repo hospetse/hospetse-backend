@@ -72,7 +72,7 @@ async function newTutor(pet = {}) {
 
 // Host elegível com um serviço de diária a R$ 120,50; overrides mudam o Host, service muda o serviço
 async function newHost(overrides = {}, service = {}) {
-    const { user } = await newUser();
+    const { user, token } = await newUser();
     const provider = await prisma.provider.create({
         data: {
             userId: user.id,
@@ -86,7 +86,7 @@ async function newHost(overrides = {}, service = {}) {
         include: { services: true },
     });
     providerIds.push(provider.id);
-    return { provider, service: provider.services[0] };
+    return { provider, service: provider.services[0], token };
 }
 
 function post(body, { token, key = randomUUID() } = {}) {
@@ -97,6 +97,17 @@ function post(body, { token, key = randomUUID() } = {}) {
 }
 
 const validBody = (service, pet) => ({ serviceId: service.id, petId: pet.id, startDate: day(10), endDate: day(13), notes: 'Toma remédio às 8h' });
+
+// Reserva gravada direto no banco, para ocupar (ou não) a agenda do Host e do pet
+function booked(service, { tutor, pet }, start, end, status = 'accepted') {
+    return prisma.reservation.create({
+        data: {
+            tutorId: tutor.id, petId: pet.id, serviceId: service.id, status,
+            startDate: new Date(day(start)), endDate: new Date(day(end)),
+            dailyPrice: 120.5, totalValue: 120.5 * (end - start),
+        },
+    });
+}
 
 test('perfil incompleto: 403 PROFILE_INCOMPLETE pela guarda da #263', async () => {
     const { token } = await newUser();
@@ -257,4 +268,88 @@ test('período com dia bloqueado pelo Host: 409 PERIOD_UNAVAILABLE; o dia da sa�
     assert.strictEqual(blocked.data.code, 'PERIOD_UNAVAILABLE');
     assert.strictEqual(checkoutOnBlockedDay.status, 201);
     assert.strictEqual(await prisma.reservation.count({ where: { tutorId: tutor.id } }), 1);
+});
+
+// #488: ocupação por outras reservas, capacidade do Host e pet em duas hospedagens
+test('período ocupado por reserva aceita, Host sem capacidade cadastrada: 409 NO_CAPACITY e nada gravado', async () => {
+    const { service } = await newHost();
+    await booked(service, await newTutor(), 10, 13);
+    const { tutor, pet, token } = await newTutor();
+
+    const res = await post(validBody(service, pet), { token });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.data.code, 'NO_CAPACITY');
+    assert.strictEqual(await prisma.reservation.count({ where: { tutorId: tutor.id } }), 0);
+});
+
+test('capacidade 2: a segunda cabe no mesmo período; a terceira recebe 409 NO_CAPACITY', async () => {
+    const { provider, service } = await newHost();
+    await prisma.hotelDetail.create({ data: { providerId: provider.id, capacity: 2 } });
+    await booked(service, await newTutor(), 10, 13);
+
+    const second = await newTutor();
+    assert.strictEqual((await post(validBody(service, second.pet), { token: second.token })).status, 201);
+    await prisma.reservation.updateMany({ where: { tutorId: second.tutor.id }, data: { status: 'accepted' } });
+
+    const third = await newTutor();
+    const res = await post(validBody(service, third.pet), { token: third.token });
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.data.code, 'NO_CAPACITY');
+});
+
+test('reservas em dias diferentes do período não somam: capacidade 2 aceita o pedido que cruza as duas', async () => {
+    const { provider, service } = await newHost();
+    await prisma.hotelDetail.create({ data: { providerId: provider.id, capacity: 2 } });
+    await booked(service, await newTutor(), 10, 11);
+    await booked(service, await newTutor(), 12, 13);
+    const { pet, token } = await newTutor();
+
+    const res = await post(validBody(service, pet), { token }); // 10 a 13: no máximo 1 pet por dia
+
+    assert.strictEqual(res.status, 201);
+});
+
+test('reserva pendente, recusada ou concluída não ocupa: 201', async () => {
+    const { service } = await newHost();
+    for (const status of ['requested', 'rejected', 'completed']) await booked(service, await newTutor(), 10, 13, status);
+    const { pet, token } = await newTutor();
+
+    assert.strictEqual((await post(validBody(service, pet), { token })).status, 201);
+});
+
+test('pet já hospedado em outro Host no período: 409 PET_ALREADY_BOOKED e nada gravado', async () => {
+    const owner = await newTutor();
+    await booked((await newHost()).service, owner, 11, 12);
+    const { service } = await newHost();
+
+    const res = await post(validBody(service, owner.pet), { token: owner.token });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.data.code, 'PET_ALREADY_BOOKED');
+    assert.strictEqual(await prisma.reservation.count({ where: { tutorId: owner.tutor.id } }), 1);
+});
+
+test('pet com solicitação pendente em outro Host: 201; o dia da saída de uma hospedagem não conta', async () => {
+    const owner = await newTutor();
+    await booked((await newHost()).service, owner, 10, 13, 'requested');
+    await booked((await newHost()).service, owner, 8, 10);
+    const { service } = await newHost();
+
+    assert.strictEqual((await post(validBody(service, owner.pet), { token: owner.token })).status, 201);
+});
+
+test('aceite: pet já aceito por outro Host no período: 409 PET_ALREADY_BOOKED e a solicitação segue pendente', async () => {
+    const owner = await newTutor();
+    await booked((await newHost()).service, owner, 10, 13);
+    const second = await newHost();
+    const pending = await booked(second.service, owner, 11, 12, 'requested');
+
+    const res = await http.post(`/api/v1/me/host/reservations/${pending.id}/accept`, null, {
+        headers: { Authorization: `Bearer ${second.token}` },
+    });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.data.code, 'PET_ALREADY_BOOKED');
+    assert.strictEqual((await prisma.reservation.findUnique({ where: { id: pending.id } })).status, 'requested');
 });
