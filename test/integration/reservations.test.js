@@ -271,16 +271,38 @@ test('período com dia bloqueado pelo Host: 409 PERIOD_UNAVAILABLE; o dia da sa�
 });
 
 // #488: ocupação por outras reservas, capacidade do Host e pet em duas hospedagens
-test('período ocupado por reserva aceita, Host sem capacidade cadastrada: 409 NO_CAPACITY e nada gravado', async () => {
+test('vaga ocupada após consulta anterior: envio revalida, retorna 409 NO_CAPACITY e nada grava (#490)', async () => {
     const { service } = await newHost();
-    await booked(service, await newTutor(), 10, 13);
     const { tutor, pet, token } = await newTutor();
+
+    // A busca ainda não existe (#476): simula no banco o estado livre consultado antes do envio.
+    assert.strictEqual(await prisma.reservation.count({ where: { serviceId: service.id } }), 0);
+    await booked(service, await newTutor(), 10, 13);
 
     const res = await post(validBody(service, pet), { token });
 
     assert.strictEqual(res.status, 409);
     assert.strictEqual(res.data.code, 'NO_CAPACITY');
     assert.strictEqual(await prisma.reservation.count({ where: { tutorId: tutor.id } }), 0);
+});
+
+test('dois pedidos simultâneos para uma vaga ficam requested e não ocupam o período (#490)', async () => {
+    const { provider, service } = await newHost();
+    await prisma.hotelDetail.create({ data: { providerId: provider.id, capacity: 1 } });
+    const first = await newTutor();
+    const second = await newTutor();
+
+    const responses = await Promise.all([
+        post(validBody(service, first.pet), { token: first.token, key: randomUUID() }),
+        post(validBody(service, second.pet), { token: second.token, key: randomUUID() }),
+    ]);
+
+    assert.deepStrictEqual(responses.map((res) => res.status), [201, 201]);
+    assert.notStrictEqual(responses[0].data.id, responses[1].data.id);
+    const saved = await prisma.reservation.findMany({ where: { serviceId: service.id } });
+    assert.strictEqual(saved.length, 2);
+    assert.ok(saved.every((reservation) => reservation.status === 'requested'));
+    assert.deepStrictEqual(saved.map((reservation) => reservation.petId).sort(), [first.pet.id, second.pet.id].sort());
 });
 
 test('capacidade 2: a segunda cabe no mesmo período; a terceira recebe 409 NO_CAPACITY', async () => {

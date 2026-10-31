@@ -161,14 +161,20 @@ test('o dia da saída não ocupa: período que começa na saída de outro é ace
 });
 
 test('capacidade 2: dois aceites no mesmo período passam e o terceiro recebe 409', async () => {
-    const tutor = await newTutor();
     const { service, token } = await newHost(2);
-    const reservations = [await newReservation(tutor, service), await newReservation(tutor, service), await newReservation(tutor, service)];
+    const reservations = [
+        await newReservation(await newTutor(), service),
+        await newReservation(await newTutor(), service),
+        await newReservation(await newTutor(), service),
+    ];
 
-    const statuses = [];
-    for (const reservation of reservations) statuses.push((await accept(token, reservation.id)).status);
+    const responses = [];
+    for (const reservation of reservations) responses.push(await accept(token, reservation.id));
 
-    assert.deepStrictEqual(statuses, [200, 200, 409]);
+    assert.deepStrictEqual(responses.map((res) => res.status), [200, 200, 409]);
+    assert.strictEqual(responses[2].data.code, 'NO_CAPACITY');
+    const saved = await prisma.reservation.findMany({ where: { id: { in: reservations.map((reservation) => reservation.id) } } });
+    assert.deepStrictEqual(saved.map((reservation) => reservation.status).sort(), ['awaiting_payment', 'awaiting_payment', 'requested']);
 });
 
 test('Host de outra solicitação: 404, igual à inexistente, e a solicitação não muda', async () => {
@@ -283,10 +289,9 @@ test('aceite e recusa simultâneos: uma decisão passa, a outra recebe 409 e nad
 });
 
 test('dois aceites simultâneos de períodos que se cruzam, sem vaga para os dois: só um passa', async () => {
-    const tutor = await newTutor();
     const { service, token } = await newHost();
-    const first = await newReservation(tutor, service, 10, 12);
-    const second = await newReservation(tutor, service, 11, 13);
+    const first = await newReservation(await newTutor(), service, 10, 12);
+    const second = await newReservation(await newTutor(), service, 11, 13);
 
     const results = await Promise.all([accept(token, first.id), accept(token, second.id)]);
 
@@ -294,4 +299,27 @@ test('dois aceites simultâneos de períodos que se cruzam, sem vaga para os doi
     assert.ok(results.some((res) => res.data.code === 'NO_CAPACITY'));
     const occupied = await prisma.reservation.count({ where: { id: { in: [first.id, second.id] }, status: 'awaiting_payment' } });
     assert.strictEqual(occupied, 1);
+});
+
+test('dois Hosts aceitam o mesmo pet simultaneamente: só um ocupa o período (#490)', async () => {
+    const tutor = await newTutor();
+    const firstHost = await newHost();
+    const secondHost = await newHost();
+    const first = await newReservation(tutor, firstHost.service, 10, 13);
+    const second = await newReservation(tutor, secondHost.service, 11, 14);
+
+    const responses = await Promise.all([
+        accept(firstHost.token, first.id),
+        accept(secondHost.token, second.id),
+    ]);
+
+    assert.deepStrictEqual(responses.map((res) => res.status).sort(), [200, 409]);
+    const winner = responses.find((res) => res.status === 200);
+    const loser = responses.find((res) => res.status === 409);
+    assert.strictEqual(winner.data.status, 'awaiting_payment');
+    assert.strictEqual(loser.data.code, 'PET_ALREADY_BOOKED');
+
+    const saved = await prisma.reservation.findMany({ where: { id: { in: [first.id, second.id] } } });
+    assert.deepStrictEqual(saved.map((reservation) => reservation.status).sort(), ['awaiting_payment', 'requested']);
+    assert.strictEqual(saved.find((reservation) => reservation.status === 'awaiting_payment').id, winner.data.id);
 });
