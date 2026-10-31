@@ -1,9 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../lib/app-error.js';
-
-// Status que ocupam o período na agenda do Host
-// shortcut: ocupação calculada pelas reservas (a agenda da #482 não é MVP); trocar pela agenda se ela entrar
-const OCCUPYING = ['awaiting_payment', 'accepted', 'checked_in'];
+import { assertPetFree, assertVacancy } from './availability.js';
 
 const DECISION_FIELDS = { id: true, status: true, decidedAt: true, rejectionReason: true };
 
@@ -11,7 +8,7 @@ const DECISION_FIELDS = { id: true, status: true, decidedAt: true, rejectionReas
 async function findOwnReservation(tx, hostId, id) {
     const reservation = await tx.reservation.findFirst({
         where: { id, service: { providerId: hostId } },
-        select: { id: true, status: true, startDate: true, endDate: true, tutor: { select: { userId: true } } },
+        select: { id: true, status: true, petId: true, startDate: true, endDate: true, tutor: { select: { userId: true } } },
     });
     if (!reservation) throw new AppError('Solicitação não encontrada', 404, 'NOT_FOUND');
     return reservation;
@@ -37,19 +34,11 @@ export function acceptHostReservationService(host, id) {
         const reservation = await findOwnReservation(tx, host.id, id);
         if (reservation.status !== 'requested') throw alreadyDecided();
 
-        // shortcut: Host sem capacidade cadastrada atende um pet por vez; exigir a capacidade no cadastro do Host
-        const detail = await tx.hotelDetail.findUnique({ where: { providerId: host.id }, select: { capacity: true } });
-        const capacity = detail?.capacity ?? 1;
-        // Períodos se cruzam quando um começa antes do outro terminar (o dia da saída não conta, como na #494)
-        const occupied = await tx.reservation.count({
-            where: {
-                status: { in: OCCUPYING },
-                service: { providerId: host.id },
-                startDate: { lt: reservation.endDate },
-                endDate: { gt: reservation.startDate },
-            },
-        });
-        if (occupied >= capacity) throw new AppError('Sem vaga no período', 409, 'NO_CAPACITY');
+        await assertVacancy(tx, host.id, reservation.startDate, reservation.endDate);
+        // Trava o pet: dois Hosts aceitando o mesmo pet ao mesmo tempo andam em fila, e o segundo já vê o primeiro.
+        // A ordem é sempre Host e depois pet, para não haver deadlock.
+        await tx.$queryRaw`SELECT id FROM pets WHERE id = ${reservation.petId}::uuid FOR UPDATE`;
+        await assertPetFree(tx, reservation.petId, reservation.startDate, reservation.endDate);
 
         return decide(tx, id, { status: 'awaiting_payment' });
     });

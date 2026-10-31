@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma.js';
 import { AppError } from '../lib/app-error.js';
 import { assertCanContract } from '../users/profile-policy.js';
 import { ELIGIBLE_HOST } from '../hosts/host-policy.js';
+import { assertPetFree, assertVacancy } from './availability.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -80,6 +81,9 @@ export async function createReservationService(user, tutor, data) {
                 where: { providerId: service.provider.id, date: { gte: data.startDate, lt: data.endDate } },
             });
             if (blocked) throw new AppError('O Host não atende nesse período', 409, 'PERIOD_UNAVAILABLE');
+            // Revalidado no envio (#488): o que a busca mostrou como livre pode ter sido ocupado depois
+            await assertVacancy(tx, service.provider.id, data.startDate, data.endDate);
+            await assertPetFree(tx, data.petId, data.startDate, data.endDate);
 
             const reservation = await tx.reservation.create({
                 data: {
