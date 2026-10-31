@@ -91,6 +91,7 @@ model Provider {
   user             User                   @relation(fields: [userId], references: [id])
   address          Address?               @relation(fields: [addressId], references: [id])
   photos           ProviderPhoto[]
+  documents        ProviderDocument[]
   hotelDetail      HotelDetail?
   petSitterDetail  PetSitterDetail?
   petWalkerDetail  PetWalkerDetail?
@@ -139,6 +140,20 @@ model ProviderPhoto {
 
   @@index([providerId])
   @@map("provider_photos")
+}
+
+// Documentos do Host para validação (#323). type: identity, proof_of_address ou cnpj_card (CHECK na migration)
+model ProviderDocument {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  providerId String   @map("provider_id") @db.Uuid
+  type       String   @db.VarChar(30)
+  // Chave no armazenamento privado, nunca URL pública: o documento só sai por link assinado (#324)
+  storageKey String   @map("storage_key") @db.VarChar(1024)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId])
+  @@map("provider_documents")
 }
 
 model HotelDetail {
