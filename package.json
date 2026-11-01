@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test test/app.test.js test/health.test.js test/cpf.test.js test/profile-policy.test.js test/auth-guard.test.js test/contracts.test.js test/reservations-rules.test.js test/host-policy.test.js test/availability.test.js",
-    "test:integration": "node --test test/integration/db.test.js test/integration/ready.test.js test/integration/tutor-profile.test.js test/integration/user-token.test.js test/integration/host-details.test.js test/integration/provisioning.test.js test/integration/pets.test.js test/integration/reservations.test.js test/integration/host-reservations.test.js test/integration/host-decisions.test.js",
+    "test:integration": "node --test test/integration/db.test.js test/integration/ready.test.js test/integration/tutor-profile.test.js test/integration/user-token.test.js test/integration/host-details.test.js test/integration/provisioning.test.js test/integration/pets.test.js test/integration/reservations.test.js test/integration/host-reservations.test.js test/integration/host-decisions.test.js test/integration/seed.test.js",
     "smoke:db": "node test/smoke/smoke-db.js",
     "dev": "nodemon index.js",
     "start": "node index.js",
