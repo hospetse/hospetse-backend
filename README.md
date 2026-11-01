@@ -585,6 +585,7 @@ Aceite e recusa de uma solicitação pendente pelo Host (Task #491, HSP-PBI-042-
 | `409` | `RESERVATION_ALREADY_DECIDED` | Já aceita ou recusada, inclusive quando outra decisão chegou antes ao mesmo tempo |
 | `409` | `NO_CAPACITY` | Aceite sem vaga em algum dia do período (a ocupação é contada dia a dia) |
 | `409` | `PET_ALREADY_BOOKED` | O pet já foi aceito por outro Host num período que se cruza com este (#488) |
+| `409` | `PERIOD_UNAVAILABLE` | Aceite com algum dia do período bloqueado na agenda, mesmo que o bloqueio seja posterior à solicitação (#482) |
 | `401` / `404` | `TOKEN_INVALID` / `USER_NOT_FOUND` | Igual ao `/me` |
 
 - **Decisão única:** o status só muda com `WHERE status = 'requested'`. Com duas decisões ao mesmo tempo, o banco deixa só uma alterar a linha; a outra recebe `409` e nada dela fica gravado (nem a notificação).
@@ -592,9 +593,57 @@ Aceite e recusa de uma solicitação pendente pelo Host (Task #491, HSP-PBI-042-
 
 **Pendências:**
 
-- \[provisório\] Ocupação calculada pelas reservas: a agenda da #482 (HSP-PBI-036) não é MVP. Trocar pela agenda se ela entrar.
 - \[provisório\] Host sem capacidade cadastrada atende um pet por vez. Exigir a capacidade no cadastro do Host.
 - Sem prazo de expiração da solicitação (TBD na HSP-PBI-042).
+
+## Agenda do Host: `GET /api/v1/me/host/agenda` e bloqueios
+
+Rotas do próprio Host para consultar e bloquear a agenda (Task #482, HSP-PBI-036-TSK-01). Exigem ser Host (`403 HOST_REQUIRED`); o Host vem só do JWT.
+
+| Rota | O que faz |
+| --- | --- |
+| `GET /api/v1/me/host/agenda?startDate&endDate` | Estado de cada dia do período: `free`, `blocked` ou `occupied` |
+| `POST /api/v1/me/host/agenda/blocks` | Bloqueia de `startDate` até o dia antes de `endDate`, uma linha por dia |
+| `DELETE /api/v1/me/host/agenda/blocks/{id}` | Libera um dia bloqueado |
+
+```http
+GET /api/v1/me/host/agenda?startDate=2026-11-10&endDate=2026-11-13
+```
+
+```json
+{
+  "startDate": "2026-11-10",
+  "endDate": "2026-11-13",
+  "capacity": 1,
+  "days": [
+    { "date": "2026-11-10", "status": "free", "occupied": 0 },
+    { "date": "2026-11-11", "status": "blocked", "occupied": 0, "block": { "id": "uuid", "reason": "Reforma" } },
+    { "date": "2026-11-12", "status": "occupied", "occupied": 1 }
+  ]
+}
+```
+
+- **Período:** `endDate` não entra, como nas reservas e na busca. Sem datas, a agenda vai de hoje até 30 dias; até 90 dias por consulta, passado permitido.
+- **Estados:** `blocked` vence `occupied`. O dia é `occupied` quando as reservas `awaiting_payment`, `accepted` ou `checked_in` chegam à capacidade (1 se não cadastrada), o mesmo critério da busca. `occupied` traz a contagem em todos os dias.
+- **Bloqueio:** body `{ "startDate", "endDate", "reason"? }`, sem passado, até 365 dias. Dia já bloqueado fica como está (com o motivo antigo). Responde `201` com `{ items: [{ id, date, reason }] }`, todos os dias bloqueados do período.
+- **Bloqueio sobre hospedagem:** se alguma reserva que ocupa cair no período, responde `409 PERIOD_OCCUPIED` e nenhum dia é bloqueado. Solicitação só pendente não impede; o aceite dela passa a responder `409 PERIOD_UNAVAILABLE`.
+- **Concorrência:** o bloqueio trava a linha do Host (`FOR UPDATE`), a mesma trava do aceite. Bloqueio e aceite do mesmo Host andam em fila.
+- **Efeito:** dia bloqueado some da busca (#476) e recusa a solicitação (#494) e o aceite (#491) com `409 PERIOD_UNAVAILABLE`.
+
+| Status | `code` | Caso |
+| --- | --- | --- |
+| `200` / `201` / `204` | — | Consulta, bloqueio e remoção |
+| `400` | `VALIDATION_ERROR` | Todos os campos inválidos em `details`: data fora do formato, fim antes do início, passado no bloqueio, período longo demais, `reason` com mais de 500 caracteres e campos fora do contrato |
+| `403` | `HOST_REQUIRED` | O usuário não é Host |
+| `404` | `NOT_FOUND` | Bloqueio inexistente, de outro Host ou `id` fora do formato UUID (mesma resposta) |
+| `409` | `PERIOD_OCCUPIED` | Bloqueio sobre período com hospedagem que ocupa |
+| `401` / `404` | `TOKEN_INVALID` / `USER_NOT_FOUND` | Igual ao `/me` |
+
+**Pendências:**
+
+- Sem migration: usa `provider_blocked_dates` (um dia por linha, `UNIQUE (provider_id, date)`). A busca repete a regra em SQL; mudar o modelo exige mudar os dois juntos.
+- Sem recorrência ("toda segunda") nem horário de funcionamento (`provider_working_hours`).
+- Desbloqueio é por dia; desbloqueio por intervalo fica para quando o app precisar.
 
 ## Deploy (Railway)
 
