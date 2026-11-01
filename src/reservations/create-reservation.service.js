@@ -2,7 +2,7 @@ import { prisma } from '../lib/prisma.js';
 import { AppError } from '../lib/app-error.js';
 import { assertCanContract } from '../users/profile-policy.js';
 import { ELIGIBLE_HOST } from '../hosts/host-policy.js';
-import { assertPetFree, assertVacancy } from './availability.js';
+import { assertNotBlocked, assertPetFree, assertVacancy } from './availability.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -76,11 +76,7 @@ export async function createReservationService(user, tutor, data) {
 
     try {
         return await prisma.$transaction(async (tx) => {
-            // shortcut: agenda pela provider_blocked_dates atual (um dia por linha); ajustar se a #482 trocar o modelo do bloqueio.
-            const blocked = await tx.providerBlockedDate.count({
-                where: { providerId: service.provider.id, date: { gte: data.startDate, lt: data.endDate } },
-            });
-            if (blocked) throw new AppError('O Host não atende nesse período', 409, 'PERIOD_UNAVAILABLE');
+            await assertNotBlocked(tx, service.provider.id, data.startDate, data.endDate);
             // Revalidado no envio (#488): o que a busca mostrou como livre pode ter sido ocupado depois
             await assertVacancy(tx, service.provider.id, data.startDate, data.endDate);
             await assertPetFree(tx, data.petId, data.startDate, data.endDate);

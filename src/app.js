@@ -9,6 +9,7 @@ import { meController } from './users/me.controller.js';
 import { tutorProfileController } from './tutors/tutor-profile.controller.js';
 import { hostDetailsController } from './hosts/host-details.controller.js';
 import { searchHostsController } from './hosts/host-search.controller.js';
+import { blockPeriodController, getAgendaController, unblockDayController } from './hosts/agenda.controller.js';
 import { requireCanContract } from './middlewares/can-contract.js';
 import { startContractController } from './contracts/contracts.controller.js';
 import { createPetController, listPetsController } from './pets/pet.controller.js';
@@ -96,6 +97,11 @@ app.get('/api/v1/me/host/reservations', listHostReservationsController);
 // Decisão do Host sobre a solicitação (HSP-PBI-042-TSK-01 #491). Ordem: JWT do usuário → (JSON, na recusa) → controller (exige ser Host).
 app.post('/api/v1/me/host/reservations/:id/accept', acceptHostReservationController);
 app.post('/api/v1/me/host/reservations/:id/reject', express.json(), rejectHostReservationController);
+
+// Agenda do Host (HSP-PBI-036-TSK-01 #482). Ordem: JWT do usuário → (JSON no POST) → controller (exige ser Host).
+app.get('/api/v1/me/host/agenda', getAgendaController);
+app.post('/api/v1/me/host/agenda/blocks', express.json(), blockPeriodController);
+app.delete('/api/v1/me/host/agenda/blocks/:id', unblockDayController);
 
 // Contratação (TSK-05 #263). Ordem: JWT do usuário → conta e perfil aptos → controller (provisório, responde 501).
 for (const path of CONTRACT_PATHS.filter((path) => path !== '/api/v1/reservations')) app.post(path, startContractController);

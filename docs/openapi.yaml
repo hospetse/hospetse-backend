@@ -460,6 +460,7 @@ paths:
             `RESERVATION_ALREADY_DECIDED`: já aceita ou recusada, inclusive quando outra decisão chegou antes ao mesmo tempo.
             `NO_CAPACITY`: algum dia do período já está com todas as vagas do Host ocupadas (a ocupação é contada dia a dia).
             `PET_ALREADY_BOOKED`: o pet já foi aceito por outro Host num período que se cruza com este.
+            `PERIOD_UNAVAILABLE`: algum dia do período está bloqueado na agenda do Host, mesmo que o bloqueio seja posterior à solicitação (#482).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -501,6 +502,93 @@ paths:
         '404': { $ref: '#/components/responses/ReservationNotFound' }
         '409':
           description: '`RESERVATION_ALREADY_DECIDED`: já aceita ou recusada'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # Agenda do Host (#482): JWT do usuário → (JSON no POST) → controller (exige ser Host). O Host vem só do JWT.
+  /api/v1/me/host/agenda:
+    get:
+      tags: [Host]
+      operationId: getHostAgenda
+      summary: Estado de cada dia da agenda do próprio Host (#482)
+      description: |
+        Cada dia do período fica `free`, `blocked` ou `occupied`. `blocked` vence `occupied`. O dia é `occupied` quando as reservas
+        aguardando pagamento, aceitas ou em andamento chegam à capacidade do Host (1 se não cadastrada), o mesmo critério da busca.
+        `endDate` não entra. Sem datas, de hoje até 30 dias; até 90 dias por consulta, passado permitido.
+      parameters:
+        - { name: startDate, in: query, schema: { type: string, format: date }, description: 'Primeiro dia (YYYY-MM-DD); padrão hoje' }
+        - { name: endDate, in: query, schema: { type: string, format: date }, description: 'Dia seguinte ao último (YYYY-MM-DD); padrão startDate + 30' }
+      responses:
+        '200':
+          description: Agenda do período
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agenda' }
+        '400':
+          description: Todos os parâmetros inválidos, incluindo os fora do contrato e período maior que 90 dias
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotHost' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/me/host/agenda/blocks:
+    post:
+      tags: [Host]
+      operationId: blockHostAgenda
+      summary: Bloqueia um período da agenda do próprio Host (#482)
+      description: |
+        Bloqueia de `startDate` até o dia antes de `endDate`, uma linha por dia. Dia já bloqueado fica como está, com o motivo antigo.
+        Recusado se alguma reserva aguardando pagamento, aceita ou em andamento cair no período; solicitação só pendente não impede,
+        e o aceite dela passa a ser recusado. Dia bloqueado some da busca e recusa solicitação e aceite com `PERIOD_UNAVAILABLE`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BlockInput' }
+            example: { startDate: '2026-11-10', endDate: '2026-11-13', reason: Reforma }
+      responses:
+        '201':
+          description: Todos os dias bloqueados do período, em ordem
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Block' } }
+        '400':
+          description: Todos os campos inválidos, incluindo passado, fim antes do início, mais de 365 dias e campos fora do contrato
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotHost' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '409':
+          description: '`PERIOD_OCCUPIED`: há hospedagem que ocupa algum dia do período; nenhum dia foi bloqueado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/me/host/agenda/blocks/{id}:
+    delete:
+      tags: [Host]
+      operationId: unblockHostAgendaDay
+      summary: Libera um dia bloqueado do próprio Host (#482)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Dia liberado }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotHost' }
+        '404':
+          description: '`NOT_FOUND`: bloqueio inexistente, de outro Host ou id fora do formato UUID (mesma resposta). Também `USER_NOT_FOUND`'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -684,6 +772,48 @@ components:
               pattern: '^[A-Za-z]{2}$'
               description: Sigla da UF; gravada em maiúsculas
               example: SP
+
+    Agenda:
+      type: object
+      required: [startDate, endDate, capacity, days]
+      properties:
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date, description: Dia seguinte ao último; não entra }
+        capacity: { type: integer, description: 'hotel_details.capacity, ou 1 se não cadastrada', example: 1 }
+        days:
+          type: array
+          items: { $ref: '#/components/schemas/AgendaDay' }
+
+    AgendaDay:
+      type: object
+      required: [date, status, occupied]
+      properties:
+        date: { type: string, format: date }
+        status: { type: string, enum: [free, blocked, occupied] }
+        occupied: { type: integer, description: 'Reservas aguardando pagamento, aceitas ou em andamento no dia', example: 0 }
+        block:
+          type: object
+          description: Só nos dias bloqueados
+          properties:
+            id: { type: string, format: uuid, description: 'Para o DELETE /api/v1/me/host/agenda/blocks/{id}' }
+            reason: { type: [string, 'null'] }
+
+    BlockInput:
+      type: object
+      additionalProperties: false
+      required: [startDate, endDate]
+      properties:
+        startDate: { type: string, format: date, description: 'Primeiro dia bloqueado, a partir de hoje' }
+        endDate: { type: string, format: date, description: 'Dia seguinte ao último bloqueado; até 365 dias depois de startDate' }
+        reason: { type: [string, 'null'], maxLength: 500 }
+
+    Block:
+      type: object
+      required: [id, date, reason]
+      properties:
+        id: { type: string, format: uuid }
+        date: { type: string, format: date }
+        reason: { type: [string, 'null'] }
 
     HostSearchResult:
       type: object
