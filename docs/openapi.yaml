@@ -231,6 +231,63 @@ paths:
         '404': { $ref: '#/components/responses/UserNotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /api/v1/hosts/search:
+    get:
+      tags: [Host]
+      operationId: searchHosts
+      summary: Busca ofertas de hospedagem compatíveis com o pet e o período (#476)
+      description: |
+        Basta estar autenticado (`canSearch`). Só Host elegível: `provider_type` hotel, `status` active e `validation_status` approved,
+        com serviço ativo. Todos os filtros são opcionais e se somam. Sem filtro, lista todas as ofertas elegíveis.
+        Compatibilidade do pet: espécie, porte e raça contra as listas aceitas pelo Host. Lista vazia aceita tudo; a comparação
+        não diferencia maiúsculas; Host que restringe um campo recusa pet sem esse dado.
+        Com período: some o Host com dia bloqueado no período ou sem vaga em algum dia. Ocupam vaga as reservas aguardando pagamento,
+        aceitas ou em andamento, até a capacidade do Host (1 se não cadastrada). O dia da saída não conta.
+        São as mesmas regras do `POST /api/v1/reservations`. Ordem: menor diária primeiro, desempate pelo `serviceId`.
+        Parâmetros fora do contrato são recusados. CPF/CNPJ, e-mail, telefone e endereço completo nunca aparecem (LGPD).
+      security:
+        - userJwt: []
+      parameters:
+        - { name: city, in: query, schema: { type: string, minLength: 1, maxLength: 100 }, description: 'Cidade do Host, sem diferenciar maiúsculas' }
+        - { name: minPrice, in: query, schema: { type: number, minimum: 0 }, description: Diária mínima em reais }
+        - { name: maxPrice, in: query, schema: { type: number, minimum: 0 }, description: Diária máxima em reais; não pode ser menor que minPrice }
+        - { name: startDate, in: query, schema: { type: string, format: date }, description: 'Entrada (YYYY-MM-DD), a partir de hoje; junto com endDate' }
+        - { name: endDate, in: query, schema: { type: string, format: date }, description: 'Saída (YYYY-MM-DD), depois de startDate; junto com startDate' }
+        - name: petId
+          in: query
+          schema: { type: string, format: uuid }
+          description: |
+            Pet ativo do próprio Tutor; espécie, porte e raça vêm dele. Não pode vir junto com `species`, `size` ou `breed`.
+            Pet de outro Tutor, inativo, inexistente ou usuário sem perfil de Tutor responde igual: 400 em `petId`.
+        - { name: species, in: query, schema: { type: string, enum: [dog, cat] }, description: 'Espécie informada à mão, sem petId' }
+        - { name: size, in: query, schema: { type: string, enum: [small, medium, large] }, description: 'Porte informado à mão, sem petId' }
+        - { name: breed, in: query, schema: { type: string, minLength: 1, maxLength: 100 }, description: 'Raça informada à mão, sem petId; sem diferenciar maiúsculas' }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        '200':
+          description: Ofertas compatíveis, menor diária primeiro. Lista vazia quando nada combina
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostSearchResult' }
+        '400':
+          description: |
+            Todos os parâmetros inválidos de uma vez, incluindo os fora do contrato, os repetidos, `petId` junto com filtros manuais,
+            só uma das datas e pet que não é do Tutor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+              example:
+                code: VALIDATION_ERROR
+                message: Parâmetros inválidos
+                details:
+                  - { field: maxPrice, message: não pode ser menor que minPrice }
+                  - { field: endDate, message: obrigatório junto com startDate }
+                  - { field: size, message: não pode vir junto com petId }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /api/v1/hosts/{id}:
     get:
       tags: [Host]
@@ -627,6 +684,40 @@ components:
               pattern: '^[A-Za-z]{2}$'
               description: Sigla da UF; gravada em maiúsculas
               example: SP
+
+    HostSearchResult:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/HostOffer' }
+        page: { type: integer, example: 1 }
+        pageSize: { type: integer, example: 20 }
+        total: { type: integer, description: 'Total de ofertas com os filtros, em todas as páginas', example: 1 }
+
+    HostOffer:
+      type: object
+      description: Um serviço ativo de um Host elegível. Mesmos nomes do HostDetails
+      required: [hostId, serviceId, name, serviceName, dailyPrice, pictureUrl, location, reputation]
+      properties:
+        hostId: { type: string, format: uuid, description: 'Para o GET /api/v1/hosts/{id}' }
+        serviceId: { type: string, format: uuid, description: Para o POST /api/v1/reservations }
+        name: { type: string, example: Hotelzinho do Rex }
+        serviceName: { type: string, example: Diária }
+        dailyPrice: { type: number, example: 95 }
+        pictureUrl: { type: [string, 'null'] }
+        location:
+          type: object
+          description: Só cidade e bairro; nunca rua, número ou CEP
+          properties:
+            city: { type: [string, 'null'], example: São Paulo }
+            neighborhood: { type: [string, 'null'], example: Bela Vista }
+        reputation:
+          type: object
+          properties:
+            rating: { type: [number, 'null'], example: 4.5 }
+            reviewCount: { type: integer, example: 12 }
 
     HostDetails:
       type: object
