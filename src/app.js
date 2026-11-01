@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import { fileURLToPath } from 'node:url';
 import { prisma } from './lib/prisma.js';
 import { requireServiceToken } from './middlewares/service-token.js';
@@ -19,6 +20,10 @@ import { acceptHostReservationController, rejectHostReservationController } from
 export const READY_TIMEOUT_MS = 2000;
 
 const app = express();
+
+// CORS (#516): só as origens do CORS_ORIGINS chamam o back-end pelo navegador. Antes do guard do /api/v1,
+// porque o preflight não leva token
+app.use(cors({ origin: process.env.CORS_ORIGINS?.split(',').map((origin) => origin.trim()) ?? [] }));
 
 // Rotas públicas (inventário no docs/openapi.yaml): /health, /health/ready e a documentação em /docs, fora do /api/v1.
 
