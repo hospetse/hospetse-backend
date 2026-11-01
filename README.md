@@ -69,6 +69,7 @@ Variáveis disponíveis (ver `.env.example` para a lista completa e atualizada):
 | `SMOKE_DATABASE_URL` | Opcional. Substitui a `DATABASE_URL` só no `npm run smoke:db` (para simular falhas) | valor temporário mantido apenas no ambiente |
 | `JWT_PUBLIC_KEY` | Chave pública RS256 do Auth Server (PEM, entre aspas), usada para validar o access token em [`GET /api/v1/me`](#estado-do-usuário-get-apiv1me). Mesmo valor da `JWT_PUBLIC_KEY` do Auth | valor mantido apenas no `.env` |
 | `INTERNAL_SERVICE_TOKEN` | Segredo compartilhado com o Auth Server, exigido na [rota interna de provisionamento](#rota-interna-de-provisionamento-do-user). Mesmo valor nos dois serviços, diferente por ambiente | valor mantido apenas no `.env` |
+| `CORS_ORIGINS` | Origens do navegador liberadas no CORS, separadas por vírgula e sem barra no fim. Vazio bloqueia todas. Precisa estar no Railway para a web local chamar o back-end | `http://localhost:8081` |
 
 > O arquivo `.env` nunca deve ser commitado (já está no `.gitignore`). Segredos e configuração de ambiente ficam só localmente ou no painel da plataforma de deploy.
 
