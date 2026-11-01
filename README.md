@@ -322,6 +322,69 @@ Rota usada pelo Tutor para ver um Host antes de solicitar (Task #479, HSP-PBI-03
 - `services`: só os ativos, do mais barato para o mais caro. `accepts.breeds` vazio significa que o Host aceita todas as raças.
 - `reputation.rating` é `null` enquanto o Host não tem avaliações.
 
+## Busca de Hosts: `GET /api/v1/hosts/search`
+
+Rota usada pelo Tutor para encontrar ofertas de hospedagem compatíveis com o pet e o período (Task #476, HSP-PBI-030-TSK-01).
+
+**Autenticação:** igual ao `/me`. Basta estar autenticado: não exige perfil completo (`canSearch`).
+
+```http
+GET /api/v1/hosts/search?city=São Paulo&startDate=2026-11-10&endDate=2026-11-13&petId=<uuid>&page=1&pageSize=20
+```
+
+| Parâmetro | Regra |
+| --- | --- |
+| `city` | Opcional. Sem diferenciar maiúsculas |
+| `minPrice` / `maxPrice` | Opcionais, `>= 0`, `minPrice <= maxPrice`. Aplicados à diária |
+| `startDate` / `endDate` | Opcionais, mas sempre juntos. `YYYY-MM-DD`, a partir de hoje, fim depois do início |
+| `petId` | Opcional. Pet ativo do próprio Tutor; espécie, porte e raça vêm dele |
+| `species` / `size` / `breed` | Opcionais, só sem `petId`. `species`: `dog`, `cat`; `size`: `small`, `medium`, `large` |
+| `page` / `pageSize` | Padrão 1 e 20; `pageSize` até 50 |
+
+Uma oferta (serviço ativo de um Host elegível) só aparece se, com os filtros informados:
+- o pet for aceito: lista vazia aceita tudo, sem diferenciar maiúsculas; Host que restringe um campo recusa pet sem o dado;
+- nenhum dia do período estiver bloqueado na agenda do Host;
+- houver vaga em todos os dias do período: reservas aguardando pagamento, aceitas ou em andamento, até a capacidade (1 se não cadastrada).
+
+São as mesmas regras do `POST /api/v1/reservations`: o que a busca mostra, a solicitação aceita com o mesmo pet e período.
+A ordem é a menor diária primeiro, com desempate pelo `serviceId`, o que deixa a paginação estável.
+
+| Status | `code` | Caso | Body |
+| --- | --- | --- | --- |
+| `200` | — | Busca feita, mesmo sem resultado | `{ items, page, pageSize, total }` |
+| `400` | `VALIDATION_ERROR` | Todos os parâmetros inválidos em `details`, incluindo os fora do contrato, os repetidos e pet que não é do Tutor | `{ "code", "message", "details" }` |
+| `401` / `404` | `TOKEN_INVALID` / `USER_NOT_FOUND` | Igual ao `/me` | `{ "code", "message" }` |
+
+```json
+{
+  "items": [
+    {
+      "hostId": "uuid",
+      "serviceId": "uuid",
+      "name": "Hotelzinho do Rex",
+      "serviceName": "Diária",
+      "dailyPrice": 95,
+      "pictureUrl": null,
+      "location": { "city": "São Paulo", "neighborhood": "Bela Vista" },
+      "reputation": { "rating": 4.5, "reviewCount": 12 }
+    }
+  ],
+  "page": 1,
+  "pageSize": 20,
+  "total": 1
+}
+```
+
+- Os filtros rodam no banco (`src/hosts/host-search.service.js`), antes de paginar: filtrar depois perderia e repetiria resultados.
+- Os campos de cada item são os públicos do `GET /api/v1/hosts/{id}`. CPF/CNPJ, e-mail, telefone, rua, número e CEP nunca saem (LGPD).
+
+**Pendências**
+- `[assunção]` (HSP-DEC-005) Só a ordenação por menor preço; outras opções ficam para depois.
+- `[assunção]` `species` informada à mão, além do porte e da raça que o card cita.
+- Sem busca por raio ou geolocalização: `latitude` e `longitude` existem, mas estão vazias.
+- O pet que já tem hospedagem no período não filtra a busca; a solicitação responde `409 PET_ALREADY_BOOKED`.
+- `[provisório]` Agenda lida de `provider_blocked_dates` (um dia por linha) até a #482.
+
 ## Pets do Tutor: `POST` e `GET /api/v1/me/pets`
 
 Cadastro e listagem dos pets do Tutor (Task #369, HSP-PBI-016-TSK-04). Só Tutor tem pet: o pet aponta para `tutors.id`, e o TUTOR nasce na conclusão do perfil (`PUT /api/v1/me/tutor-profile`). Antes disso, as duas rotas respondem `403 PROFILE_INCOMPLETE`.
