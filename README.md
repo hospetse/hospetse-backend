@@ -20,9 +20,22 @@ Execute **primeiro neste repositório e depois no Auth Server**, usando os banco
 | Tutor completo | `tutor.completo@hospetse.dev` | Perfil completo, adulto, endereço e contato de emergência |
 | Tutor incompleto | `tutor.incompleto@hospetse.dev` | Perfil incompleto, sem registro de Tutor até concluir o perfil |
 
-O Tutor completo possui Rex (`dog`, `medium`), Mia (`cat`, `small`) e Thor (`dog`, `large`), todos ativos. Os dados de perfil são fixtures de demonstração. Os UUIDs e e-mails de `prisma/seed-accounts.js` devem permanecer iguais nos dois repositórios: no Auth o UUID é `user_auth.id`; aqui é `users.auth_user_id`.
+O Tutor completo possui Rex (`dog`, `medium`, Vira-lata), Mia (`cat`, `small`, Siamês) e Thor (`dog`, `large`, Labrador), todos ativos. Os dados de perfil são fixtures de demonstração.
 
-Reexecutar preserva IDs e a data de conclusão do perfil, restaura os dados de demonstração e não duplica contas, endereço, Tutor ou pets. Conflitos de UUID/e-mail/papel, prestador associado, Tutor em conta reservada incompleta ou pet pertencente a outro Tutor abortam a transação inteira. Conflito de CPF também causa rollback. Investigue o conflito; não exclua contas reais para liberar o seed.
+**Hosts de demonstração (#498).** Seis contas `host.*@hospetse.dev`, com identidade criada pelo seed do Auth, cada uma com prestador, endereço, diária, capacidade e fotos placeholder. Os validados gravam os mesmos valores do fluxo do Administrador (`hotel`, `active`, `approved`): a busca não tem desvio para dados de seed.
+
+| E-mail | Hotel | Cidade | Diária | Aceita | Capacidade | Agenda | Na busca |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `host.aberto@` | Hotel Aberto | São Paulo | 80 | tudo | 3 | livre | sim |
+| `host.caes@` | Hotel Só Cães | São Paulo | 120 | `dog`, `small`/`medium` | 2 | bloqueado de hoje+7 a hoje+9 | sim |
+| `host.gatos@` | Hotel Gatos | Campinas | 150 | `cat` | 1 | ocupado de hoje+14 a hoje+16 (Mia) | sim |
+| `host.racas@` | Hotel Raças | Rio de Janeiro | 200 | `dog`, raças Labrador e Golden | 2 | livre | sim |
+| `host.pendente@` | Hotel Pendente | São Paulo | 90 | tudo | 1 | — | não (`pending`) |
+| `host.inativo@` | Hotel Inativo | São Paulo | 90 | tudo | 1 | — | não (`inactive`) |
+
+Com os pets do Tutor completo: Rex encontra Aberto e Só Cães; Mia, Aberto e Gatos; Thor, Aberto e Raças. A agenda é relativa ao dia em que o seed roda: cada execução recria fotos, bloqueios e a reserva de ocupação dos Hosts do seed (o total não cresce). Bloqueios feitos à mão nesses Hosts se perdem ao rodar de novo. A ocupação usa a Mia: ela fica com `PET_ALREADY_BOOKED` nesse período. Os UUIDs e e-mails de `prisma/seed-accounts.js` devem permanecer iguais nos dois repositórios: no Auth o UUID é `user_auth.id`; aqui é `users.auth_user_id`.
+
+Reexecutar preserva IDs e a data de conclusão do perfil, restaura os dados de demonstração e não duplica contas, endereços, Tutor, pets, prestadores, serviços, fotos, bloqueios ou reservas. Conflitos de UUID/e-mail/papel, prestador em conta de Admin ou Tutor, Tutor em conta de Host ou em conta reservada incompleta, pet de outro Tutor, e prestador, endereço, serviço ou reserva do seed pertencentes a outro cadastro abortam a transação inteira. Conflito de CPF também causa rollback. Investigue o conflito; não exclua contas reais para liberar o seed.
 
 `[assunção]` (#497) A rota de serviço do Auth citada no card ainda não existe. Usamos dois seeds locais, cada um acessando somente seu banco. A transação é por banco; não há atomicidade entre serviços. Se a segunda execução falhar, corrija o problema e repita. Não rode como parte do Dockerfile ou pipeline.
 
@@ -36,7 +49,7 @@ Configure no processo `SEED_TEST_DATABASE_URL` apontando para um PostgreSQL loca
 node --test test/integration/seed.test.js
 ```
 
-O teste valida criação, reexecução sem duplicatas, JWT resolvido pelo `sub`, `/me`, pets e rollback por conflitos. Só remove os registros de teste. Também entra em `npm run test:integration`, mas fica ignorado sem `SEED_TEST_DATABASE_URL`; não usa o Railway como fallback. Rode separadamente dos demais testes de banco, pois exige banco vazio.
+O teste valida criação, reexecução sem duplicatas (também dos dados de Host), JWT resolvido pelo `sub`, `/me`, pets, a busca com cada filtro sobre os Hosts do seed (pendente e inativo fora), a agenda bloqueada e ocupada e rollback por conflitos. Só remove os registros de teste. Também entra em `npm run test:integration`, mas fica ignorado sem `SEED_TEST_DATABASE_URL`; não usa o Railway como fallback. Rode separadamente dos demais testes de banco, pois exige banco vazio.
 
 ## Pré-requisitos
 
