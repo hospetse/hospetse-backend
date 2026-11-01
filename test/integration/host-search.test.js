@@ -272,3 +272,117 @@ test('o que a busca mostra, a solicitação aceita: mesmo pet e período respond
     assert.strictEqual(created.status, 201);
     assert.strictEqual(created.data.hostId, offer.hostId);
 });
+
+// #478: matriz completa da busca (cada filtro isolado e combinado, exclusões, agenda e paginação)
+test('cidade: Host de outra cidade não aparece', async () => {
+    const city = newCity();
+    const { token } = await newUser();
+    const here = await newHost(city);
+    await newHost(newCity());
+
+    const res = await search({ city }, token);
+
+    assert.deepStrictEqual(serviceIds(res), [here.service.id]);
+});
+
+test('validação rejeitada também fica fora', async () => {
+    const city = newCity();
+    const { token } = await newUser();
+    await newHost(city, { validationStatus: 'rejected' });
+
+    const res = await search({ city }, token);
+
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(res.data, { items: [], page: 1, pageSize: 20, total: 0 });
+});
+
+test('filtros combinados: cada Host excluído por um único filtro some, só o que passa em todos fica', async () => {
+    const city = newCity();
+    const { pet, token } = await newTutor();
+    const occupant = await newTutor();
+    const match = await newHost(city, {}, { price: 100 });
+    await newHost(newCity(), {}, { price: 100 }); // cidade
+    await newHost(city, {}, { price: 300 }); // preço
+    await newHost(city, { acceptedSpecies: ['cat'] }, { price: 100 }); // pet
+    const full = await newHost(city, {}, { price: 100 }); // período
+    await booked(full.service, occupant, 10, 13);
+
+    const res = await search({ city, minPrice: 50, maxPrice: 150, petId: pet.id, startDate: day(10), endDate: day(13) }, token);
+
+    assert.deepStrictEqual(serviceIds(res), [match.service.id]);
+    assert.strictEqual(res.data.total, 1);
+});
+
+test('ocupam vaga: aguardando pagamento, aceita e em andamento; não ocupam: pendente, recusada, cancelada, concluída', async () => {
+    const city = newCity();
+    const { token } = await newUser();
+    const occupant = await newTutor();
+    const hosts = {};
+    for (const status of ['awaiting_payment', 'accepted', 'checked_in', 'requested', 'rejected', 'cancelled', 'completed']) {
+        hosts[status] = await newHost(city);
+        await booked(hosts[status].service, occupant, 10, 13, status);
+    }
+
+    const res = await search({ city, startDate: day(10), endDate: day(13) }, token);
+
+    const expected = ['requested', 'rejected', 'cancelled', 'completed'].map((status) => hosts[status].service.id);
+    assert.deepStrictEqual(serviceIds(res).sort(), expected.sort());
+});
+
+test('agenda de um Host não afeta outro: bloqueio e reserva só valem para o próprio Host', async () => {
+    const city = newCity();
+    const { token } = await newUser();
+    const occupant = await newTutor();
+    const busy = await newHost(city);
+    await prisma.providerBlockedDate.create({ data: { providerId: busy.provider.id, date: new Date(day(11)) } });
+    await booked(busy.service, occupant, 10, 13);
+    const other = await newHost(city);
+
+    const res = await search({ city, startDate: day(10), endDate: day(13) }, token);
+
+    assert.deepStrictEqual(serviceIds(res), [other.service.id]);
+});
+
+test('vaga contada por dia: reservas em dias diferentes não somam; no mesmo dia, somam', async () => {
+    const city = newCity();
+    const { token } = await newUser();
+    const occupant = await newTutor();
+    const differentDays = await newHost(city);
+    await prisma.hotelDetail.create({ data: { providerId: differentDays.provider.id, capacity: 2 } });
+    await booked(differentDays.service, occupant, 10, 11);
+    await booked(differentDays.service, occupant, 12, 13);
+    const sameDay = await newHost(city);
+    await prisma.hotelDetail.create({ data: { providerId: sameDay.provider.id, capacity: 2 } });
+    await booked(sameDay.service, occupant, 10, 12);
+    await booked(sameDay.service, occupant, 11, 13);
+
+    const res = await search({ city, startDate: day(10), endDate: day(13) }, token);
+
+    assert.deepStrictEqual(serviceIds(res), [differentDays.service.id]);
+});
+
+test('sem período, a agenda não filtra: Host lotado ou com dia bloqueado aparece', async () => {
+    const city = newCity();
+    const { token } = await newUser();
+    const host = await newHost(city);
+    await prisma.providerBlockedDate.create({ data: { providerId: host.provider.id, date: new Date(day(11)) } });
+    await booked(host.service, await newTutor(), 10, 13);
+
+    const res = await search({ city }, token);
+
+    assert.deepStrictEqual(serviceIds(res), [host.service.id]);
+});
+
+test('página além do fim: lista vazia com o total; a mesma busca repetida devolve a mesma ordem', async () => {
+    const city = newCity();
+    const { token } = await newUser();
+    for (const price of [100, 100, 100]) await newHost(city, {}, { price });
+
+    const beyond = await search({ city, page: 5, pageSize: 2 }, token);
+    const first = await search({ city }, token);
+    const again = await search({ city }, token);
+
+    assert.strictEqual(beyond.status, 200);
+    assert.deepStrictEqual(beyond.data, { items: [], page: 5, pageSize: 2, total: 3 });
+    assert.deepStrictEqual(serviceIds(again), serviceIds(first));
+});
