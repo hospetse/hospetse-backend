@@ -4,6 +4,40 @@ API do back-end do Hospetse (plataforma de hospedagem e cuidado de pets), constr
 
 As decisões de arquitetura do projeto (por que Express, ES Modules, estratégia de testes, etc.) estão documentadas na [wiki do projeto](https://dev.azure.com/escola-ti/Hospetse/_wiki/wikis/Hospetse.wiki/55/Arquitetura) (ADR-001 a ADR-010).
 
+## Seed de demonstração (#497)
+
+Execução manual, fora do deploy. Com dependências instaladas e `DATABASE_URL` do back-end configurada no `.env`, aplique as migrations com `npx prisma migrate deploy` e execute:
+
+```bash
+npx prisma db seed
+```
+
+Execute **primeiro neste repositório e depois no Auth Server**, usando os bancos do mesmo ambiente. O Auth possui seu próprio seed e recebe as senhas por `SEED_ADMIN_PASSWORD` e `SEED_TUTOR_PASSWORD` no `.env` privado. Nenhuma senha fica no back-end.
+
+| Conta | E-mail de demonstração | Estado |
+| --- | --- | --- |
+| Administrador | `admin@hospetse.dev` | `admin`, sem Tutor ou prestador |
+| Tutor completo | `tutor.completo@hospetse.dev` | Perfil completo, adulto, endereço e contato de emergência |
+| Tutor incompleto | `tutor.incompleto@hospetse.dev` | Perfil incompleto, sem registro de Tutor até concluir o perfil |
+
+O Tutor completo possui Rex (`dog`, `medium`), Mia (`cat`, `small`) e Thor (`dog`, `large`), todos ativos. Os dados de perfil são fixtures de demonstração. Os UUIDs e e-mails de `prisma/seed-accounts.js` devem permanecer iguais nos dois repositórios: no Auth o UUID é `user_auth.id`; aqui é `users.auth_user_id`.
+
+Reexecutar preserva IDs e a data de conclusão do perfil, restaura os dados de demonstração e não duplica contas, endereço, Tutor ou pets. Conflitos de UUID/e-mail/papel, prestador associado, Tutor em conta reservada incompleta ou pet pertencente a outro Tutor abortam a transação inteira. Conflito de CPF também causa rollback. Investigue o conflito; não exclua contas reais para liberar o seed.
+
+`[assunção]` (#497) A rota de serviço do Auth citada no card ainda não existe. Usamos dois seeds locais, cada um acessando somente seu banco. A transação é por banco; não há atomicidade entre serviços. Se a segunda execução falhar, corrija o problema e repita. Não rode como parte do Dockerfile ou pipeline.
+
+Após os dois seeds, faça login no Auth (`POST /api/v1/auth/login`) e use o access token no back-end em `GET /api/v1/me`. O Tutor completo retorna `canContract: true` e três pets em `GET /api/v1/me/pets`; o incompleto retorna `canContract: false`. O papel de Administrador é persistido no banco; `/me` ainda não o expõe.
+
+### Teste isolado do seed
+
+Configure no processo `SEED_TEST_DATABASE_URL` apontando para um PostgreSQL local **vazio e descartável**, com nome terminado em `_seed_test`. Aplique as migrations nesse banco usando `DATABASE_URL` com o mesmo valor. Execute:
+
+```bash
+node --test test/integration/seed.test.js
+```
+
+O teste valida criação, reexecução sem duplicatas, JWT resolvido pelo `sub`, `/me`, pets e rollback por conflitos. Só remove os registros de teste. Também entra em `npm run test:integration`, mas fica ignorado sem `SEED_TEST_DATABASE_URL`; não usa o Railway como fallback. Rode separadamente dos demais testes de banco, pois exige banco vazio.
+
 ## Pré-requisitos
 
 - **Node.js 20.12.0 ou superior** (o projeto usa `process.loadEnvFile`, disponível no Node 21.7.0 e portado para o 20.12.0 — ver ADR-009/ADR-010 na wiki). O mesmo requisito está no campo `engines` do `package.json`.
