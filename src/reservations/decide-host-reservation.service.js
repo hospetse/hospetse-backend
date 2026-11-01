@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../lib/app-error.js';
-import { assertPetFree, assertVacancy } from './availability.js';
+import { assertNotBlocked, assertPetFree, assertVacancy } from './availability.js';
 
 const DECISION_FIELDS = { id: true, status: true, decidedAt: true, rejectionReason: true };
 
@@ -34,6 +34,8 @@ export function acceptHostReservationService(host, id) {
         const reservation = await findOwnReservation(tx, host.id, id);
         if (reservation.status !== 'requested') throw alreadyDecided();
 
+        // Bloqueio feito depois da solicitação também impede o aceite (#482). A trava do Host acima põe aceite e bloqueio em fila
+        await assertNotBlocked(tx, host.id, reservation.startDate, reservation.endDate);
         await assertVacancy(tx, host.id, reservation.startDate, reservation.endDate);
         // Trava o pet: dois Hosts aceitando o mesmo pet ao mesmo tempo andam em fila, e o segundo já vê o primeiro.
         // A ordem é sempre Host e depois pet, para não haver deadlock.
@@ -41,7 +43,8 @@ export function acceptHostReservationService(host, id) {
         await assertPetFree(tx, reservation.petId, reservation.startDate, reservation.endDate);
 
         return decide(tx, id, { status: 'awaiting_payment' });
-    });
+    // Quem espera a trava do Host conta esse tempo no timeout; os 5 s padrão não cobrem dois aceites seguidos com a latência do Railway
+    }, { timeout: 15000 });
 }
 
 // Recusa pelo Host (POST /api/v1/me/host/reservations/:id/reject, #491): vai para rejected com o motivo e registra o evento
