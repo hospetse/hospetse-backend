@@ -1,16 +1,13 @@
 import { AppError } from '../lib/app-error.js';
+import { isRealDate } from '../lib/date.js';
 import { requireTutor } from '../pets/pet-policy.js';
 import { createReservationService } from './create-reservation.service.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
 // Gerada pelo app a cada intenção de solicitar (um UUID, por exemplo) e repetida nos reenvios
 const IDEMPOTENCY_KEY = /^[\w-]{1,100}$/;
 
 const isOptional = (value) => value === undefined || value === null || value === '';
-// new Date('2026-02-30') vira 02/03 sem erro: só aceita se a data convertida voltar igual ao texto
-const isRealDate = (value) => typeof value === 'string' && DATE.test(value)
-    && !isNaN(new Date(value)) && new Date(value).toISOString().slice(0, 10) === value;
 
 // POST /api/v1/reservations (HSP-PBI-039-TSK-01 #494): o Tutor solicita hospedagem de um pet num serviço de um Host.
 // Ordem no app.js: JWT do usuário → guarda de contratação (#263) → JSON → este controller.

@@ -7,6 +7,7 @@ import { requireUser } from './middlewares/user-token.js';
 import { meController } from './users/me.controller.js';
 import { tutorProfileController } from './tutors/tutor-profile.controller.js';
 import { hostDetailsController } from './hosts/host-details.controller.js';
+import { searchHostsController } from './hosts/host-search.controller.js';
 import { requireCanContract } from './middlewares/can-contract.js';
 import { startContractController } from './contracts/contracts.controller.js';
 import { createPetController, listPetsController } from './pets/pet.controller.js';
@@ -72,6 +73,8 @@ app.get('/api/v1/me', meController);
 // Conclusão do perfil do Tutor (TSK-04 #275). Ordem: JWT do usuário → leitura do JSON → controller.
 app.put('/api/v1/me/tutor-profile', express.json(), tutorProfileController);
 
+// Busca de Hosts (HSP-PBI-030-TSK-01 #476). Antes de /hosts/:id: senão "search" cai no controller de detalhes (404).
+app.get('/api/v1/hosts/search', searchHostsController);
 // Detalhes públicos do Host (HSP-PBI-031-TSK-01 #479). Ordem: JWT do usuário → controller (GET, sem body).
 app.get('/api/v1/hosts/:id', hostDetailsController);
 
