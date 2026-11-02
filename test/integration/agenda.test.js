@@ -217,3 +217,155 @@ test('um Host não vê nem apaga o bloqueio de outro; o dono apaga e o dia volta
     assert.strictEqual(ownDelete.status, 204);
     assert.strictEqual(after.data.days[0].status, 'free');
 });
+
+// #484: matriz completa da agenda (estados, limites, desbloqueio, isolamento e concorrência com o aceite)
+test('sem token: 401 nas três rotas', async () => {
+    const responses = [
+        await http.get('/api/v1/me/host/agenda'),
+        await http.post('/api/v1/me/host/agenda/blocks', { startDate: day(1), endDate: day(2) }),
+        await http.delete(`/api/v1/me/host/agenda/blocks/${randomUUID()}`),
+    ];
+    for (const res of responses) assert.strictEqual(res.status, 401);
+});
+
+test('agenda sem datas: 30 dias a partir de hoje, todos livres, com a capacidade cadastrada', async () => {
+    const host = await newHost();
+    await prisma.hotelDetail.create({ data: { providerId: host.provider.id, capacity: 3 } });
+
+    const res = await http.get('/api/v1/me/host/agenda', auth(host.token));
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.data.startDate, day(0));
+    assert.strictEqual(res.data.capacity, 3);
+    assert.strictEqual(res.data.days.length, 30);
+    assert.ok(res.data.days.every((d) => d.status === 'free' && d.occupied === 0));
+});
+
+test('só aguardando pagamento, aceita e em andamento ocupam o dia; os demais status deixam livre', async () => {
+    const occupant = await newTutor();
+    const statuses = ['awaiting_payment', 'accepted', 'checked_in', 'requested', 'rejected', 'cancelled', 'completed'];
+    const result = {};
+    for (const status of statuses) {
+        const host = await newHost();
+        await booked(host.service, occupant, 10, 11, status);
+        const res = await agenda(host.token, 10, 11);
+        result[status] = [res.data.days[0].status, res.data.days[0].occupied];
+    }
+
+    assert.deepStrictEqual(result, {
+        awaiting_payment: ['occupied', 1], accepted: ['occupied', 1], checked_in: ['occupied', 1],
+        requested: ['free', 0], rejected: ['free', 0], cancelled: ['free', 0], completed: ['free', 0],
+    });
+});
+
+test('ocupação por dia: o dia da saída fica livre; com capacidade 2, duas reservas no mesmo dia ocupam', async () => {
+    const host = await newHost();
+    await prisma.hotelDetail.create({ data: { providerId: host.provider.id, capacity: 2 } });
+    await booked(host.service, await newTutor(), 10, 12);
+    await booked(host.service, await newTutor(), 11, 13);
+
+    const res = await agenda(host.token, 10, 14);
+
+    assert.deepStrictEqual(res.data.days.map((d) => [d.status, d.occupied]), [
+        ['free', 1], ['occupied', 2], ['free', 1], ['free', 0],
+    ]);
+});
+
+test('dia com bloqueio e reserva ao mesmo tempo aparece como bloqueado', async () => {
+    const host = await newHost();
+    await booked(host.service, await newTutor(), 10, 11);
+    // Só existe gravando direto: a rota não deixa bloquear dia ocupado
+    await prisma.providerBlockedDate.create({ data: { providerId: host.provider.id, date: new Date(day(10)) } });
+
+    const res = await agenda(host.token, 10, 11);
+
+    assert.deepStrictEqual([res.data.days[0].status, res.data.days[0].occupied], ['blocked', 1]);
+});
+
+test('bloqueio sobre reserva: 409 em aguardando pagamento e em andamento; 201 em recusada, cancelada e a partir da saída', async () => {
+    const occupant = await newTutor();
+    const outcomes = {};
+    for (const status of ['awaiting_payment', 'checked_in', 'rejected', 'cancelled']) {
+        const host = await newHost();
+        await booked(host.service, occupant, 10, 12, status);
+        const res = await block(host.token, { startDate: day(10), endDate: day(12) });
+        outcomes[status] = res.status === 409 ? res.data.code : res.status;
+    }
+    const adjacent = await newHost();
+    await booked(adjacent.service, occupant, 10, 12);
+    const fromCheckout = await block(adjacent.token, { startDate: day(12), endDate: day(14) });
+
+    assert.deepStrictEqual(outcomes, { awaiting_payment: 'PERIOD_OCCUPIED', checked_in: 'PERIOD_OCCUPIED', rejected: 201, cancelled: 201 });
+    assert.strictEqual(fromCheckout.status, 201);
+});
+
+test('limites do bloqueio: um dia a partir de hoje e 365 dias passam; 366 dias recebe 400', async () => {
+    const host = await newHost();
+
+    const oneDay = await block(host.token, { startDate: day(0), endDate: day(1) });
+    const fullYear = await block(host.token, { startDate: day(1), endDate: day(366) });
+    const tooLong = await block(host.token, { startDate: day(1), endDate: day(367) });
+
+    assert.strictEqual(oneDay.status, 201);
+    assert.deepStrictEqual(oneDay.data.items.map((b) => b.date), [day(0)]);
+    assert.strictEqual(fullYear.status, 201);
+    assert.strictEqual(fullYear.data.items.length, 365);
+    assert.strictEqual(tooLong.status, 400);
+    assert.deepStrictEqual(tooLong.data.details, [{ field: 'endDate', message: 'até 365 dias depois de startDate' }]);
+});
+
+test('desbloquear devolve o dia à busca e à solicitação; apagar de novo responde 404', async () => {
+    const host = await newHost();
+    const { pet, token } = await newTutor();
+    const period = { city: host.city, startDate: day(10), endDate: day(12) };
+    const { data } = await block(host.token, { startDate: day(11), endDate: day(12) });
+    const [blocked] = data.items;
+
+    const hidden = await http.get('/api/v1/hosts/search', { params: period, ...auth(token) });
+    const removed = await http.delete(`/api/v1/me/host/agenda/blocks/${blocked.id}`, auth(host.token));
+    const again = await http.delete(`/api/v1/me/host/agenda/blocks/${blocked.id}`, auth(host.token));
+    const shown = await http.get('/api/v1/hosts/search', { params: period, ...auth(token) });
+    const created = await http.post('/api/v1/reservations',
+        { serviceId: host.service.id, petId: pet.id, startDate: day(10), endDate: day(12) },
+        { headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': randomUUID() } });
+
+    assert.deepStrictEqual(hidden.data.items, []);
+    assert.strictEqual(removed.status, 204);
+    assert.strictEqual(again.status, 404);
+    assert.deepStrictEqual(shown.data.items.map((i) => i.hostId), [host.provider.id]);
+    assert.strictEqual(created.status, 201);
+});
+
+test('a agenda de um Host não mostra a ocupação nem os bloqueios de outro', async () => {
+    const busy = await newHost();
+    const other = await newHost();
+    await booked(busy.service, await newTutor(), 10, 11);
+    await block(busy.token, { startDate: day(11), endDate: day(12) });
+
+    const res = await agenda(other.token, 10, 12);
+
+    assert.deepStrictEqual(res.data.days.map((d) => [d.status, d.occupied]), [['free', 0], ['free', 0]]);
+});
+
+test('bloqueio e aceite ao mesmo tempo no mesmo período: só um passa e o estado final é coerente', async () => {
+    const host = await newHost();
+    const pending = await booked(host.service, await newTutor(), 10, 12, 'requested');
+
+    const [blocked, accepted] = await Promise.all([
+        block(host.token, { startDate: day(10), endDate: day(12) }),
+        http.post(`/api/v1/me/host/reservations/${pending.id}/accept`, null, auth(host.token)),
+    ]);
+
+    const status = (await prisma.reservation.findUnique({ where: { id: pending.id } })).status;
+    const blocks = await prisma.providerBlockedDate.count({ where: { providerId: host.provider.id } });
+    if (blocked.status === 201) {
+        assert.strictEqual(accepted.status, 409);
+        assert.strictEqual(accepted.data.code, 'PERIOD_UNAVAILABLE');
+        assert.deepStrictEqual([status, blocks], ['requested', 2]);
+    } else {
+        assert.strictEqual(blocked.status, 409);
+        assert.strictEqual(blocked.data.code, 'PERIOD_OCCUPIED');
+        assert.strictEqual(accepted.status, 200);
+        assert.deepStrictEqual([status, blocks], ['awaiting_payment', 0]);
+    }
+});
