@@ -9,6 +9,7 @@ const FILE_RULES = {
 };
 
 const DEFAULT_SIGNED_URL_SECONDS = 300;
+const PHOTO_URL_SECONDS = 60 * 60;
 
 // O tipo vem dos primeiros bytes: nome e Content-Type são informados pelo cliente e podem ser falsos.
 export function detectFileType(buffer) {
@@ -43,9 +44,9 @@ export class S3Storage {
         await this.#send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: buffer, ContentType: contentType }));
     }
 
-    async signedUrl(key) {
+    async signedUrl(key, expiresIn = this.signedUrlSeconds) {
         const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
-        return getSignedUrl(this.client, command, { expiresIn: this.signedUrlSeconds });
+        return getSignedUrl(this.client, command, { expiresIn });
     }
 
     async remove(key) {
@@ -61,4 +62,14 @@ export class S3Storage {
             throw new AppError('Não foi possível processar o arquivo. Tente novamente', 503, 'STORAGE_UNAVAILABLE');
         }
     }
+}
+
+let storage;
+
+// Colunas de foto do Host guardam a chave no bucket ou uma URL externa (seed). Só para fotos: documento não passa por aqui.
+export async function publicFileUrl(value) {
+    if (!value || /^https?:\/\//i.test(value)) return value;
+    // criado no primeiro uso: quem só tem URL externa não depende das variáveis S3_*
+    storage ??= new S3Storage();
+    return storage.signedUrl(value, PHOTO_URL_SECONDS);
 }

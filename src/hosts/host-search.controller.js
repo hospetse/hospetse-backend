@@ -1,4 +1,5 @@
 import { AppError } from '../lib/app-error.js';
+import { publicFileUrl } from '../lib/storage.js';
 import { parseSearchQuery } from './host-search-policy.js';
 import { findTutorPet, searchHostsService } from './host-search.service.js';
 
@@ -26,7 +27,7 @@ export async function searchHostsController(req, res) {
         }
 
         const result = await searchHostsService(filters, pet);
-        return res.status(200).json({ ...result, items: result.items.map(toResponse) });
+        return res.status(200).json({ ...result, items: await Promise.all(result.items.map(toResponse)) });
     } catch (error) {
         if (error instanceof AppError) {
             return res.status(error.statusCode).json({ code: error.code, message: error.message, details: error.details });
@@ -37,7 +38,7 @@ export async function searchHostsController(req, res) {
 }
 
 // Mesmos nomes do GET /api/v1/hosts/:id, para a tela de resultado e a de detalhes usarem o mesmo formato
-function toResponse(service) {
+async function toResponse(service) {
     const host = service.provider;
     return {
         hostId: host.id,
@@ -45,7 +46,7 @@ function toResponse(service) {
         name: host.name,
         serviceName: service.name,
         dailyPrice: Number(service.price),
-        pictureUrl: host.urlPicture,
+        pictureUrl: await publicFileUrl(host.urlPicture),
         location: { city: host.address?.city ?? null, neighborhood: host.address?.neighborhood ?? null },
         reputation: { rating: host.rating == null ? null : Number(host.rating), reviewCount: host._count.reviews },
     };

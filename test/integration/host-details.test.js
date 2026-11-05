@@ -20,6 +20,8 @@ if (!process.env.DATABASE_URL) {
 
 const { publicKey, privateKey } = await generateKeyPair('RS256');
 process.env.JWT_PUBLIC_KEY = await exportSPKI(publicKey);
+// Assinar não usa a rede: credenciais falsas bastam para testar o link
+Object.assign(process.env, { S3_BUCKET: 'bucket-teste', S3_ENDPOINT: 'https://storage.invalid', S3_REGION: 'auto', S3_ACCESS_KEY_ID: 'id-teste', S3_SECRET_ACCESS_KEY: 'segredo-teste' });
 
 const { default: app } = await import('../../src/app.js');
 const server = app.listen(0);
@@ -120,6 +122,20 @@ test('Host elegível: 200 com os dados públicos e só os serviços ativos, do m
         ],
         reputation: { rating: 4.5, reviewCount: 0 },
     });
+});
+
+test('foto guardada no bucket: a resposta traz link assinado, nunca a chave', async () => {
+    const { provider } = await newHost({
+        urlPicture: 'photos/it-detalhes/perfil.jpg',
+        photos: { create: [{ url: 'photos/it-detalhes/1.jpg' }, { url: 'https://exemplo.com/2.jpg' }] },
+    });
+    const res = await http.get(`/api/v1/hosts/${provider.id}`, auth);
+
+    assert.strictEqual(res.status, 200);
+    assert.match(res.data.pictureUrl, /^https:.*photos\/it-detalhes\/perfil\.jpg\?.*X-Amz-Signature=/);
+    assert.strictEqual(res.data.photos.length, 2);
+    assert.ok(res.data.photos.some((url) => /photos\/it-detalhes\/1\.jpg\?.*X-Amz-Signature=/.test(url)));
+    assert.ok(res.data.photos.includes('https://exemplo.com/2.jpg'));
 });
 
 test('nenhum dado privado na resposta: documento, e-mail, endereço completo e ids internos', async () => {

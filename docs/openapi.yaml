@@ -836,7 +836,7 @@ components:
         name: { type: string, example: Hotelzinho do Rex }
         serviceName: { type: string, example: Diária }
         dailyPrice: { type: number, example: 95 }
-        pictureUrl: { type: [string, 'null'] }
+        pictureUrl: { type: [string, 'null'], description: 'Foto de perfil. Pode ser um link temporário: não guardar para usar depois' }
         location:
           type: object
           description: Só cidade e bairro; nunca rua, número ou CEP
@@ -856,7 +856,7 @@ components:
         id: { type: string, format: uuid }
         name: { type: string, description: Nome de exibição }
         description: { type: [string, 'null'], maxLength: 2000 }
-        pictureUrl: { type: [string, 'null'], description: Foto de perfil }
+        pictureUrl: { type: [string, 'null'], description: 'Foto de perfil. Pode ser um link temporário: não guardar para usar depois' }
         location:
           type: object
           description: Só cidade e bairro; nunca rua, número ou CEP
@@ -865,7 +865,7 @@ components:
             neighborhood: { type: [string, 'null'] }
         photos:
           type: array
-          description: URLs das fotos, da mais antiga para a mais nova
+          description: 'URLs das fotos, da mais antiga para a mais nova. Podem ser links temporários: não guardar para usar depois'
           items: { type: string }
         accepts:
           type: object
