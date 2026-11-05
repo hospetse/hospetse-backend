@@ -588,6 +588,101 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /api/v1/me/host/documents:
+    post:
+      tags: [Host]
+      operationId: addHostDocument
+      summary: Envia um documento do cadastro do Host (#325)
+      description: |
+        Um arquivo por requisição, em rascunho do próprio usuário. O tipo é conferido pelo conteúdo do arquivo: nome e `Content-Type`
+        enviados pelo cliente são ignorados. PDF, JPEG ou PNG, até 10 MB e até 5 arquivos por tipo de documento.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [type, file]
+              properties:
+                type: { type: string, enum: [identity, proof_of_address, cnpj_card] }
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: Documento guardado. A chave no armazenamento nunca sai
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostDocument' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404':
+          description: '`NOT_FOUND`: o usuário ainda não tem cadastro de Host. `USER_NOT_FOUND`: usuário não encontrado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409': { $ref: '#/components/responses/HostFileConflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/StorageUnavailable' }
+
+  /api/v1/me/host/documents/{id}:
+    get:
+      tags: [Host]
+      operationId: getHostDocumentLink
+      summary: Link temporário de um documento, só para o titular (#325)
+      description: O link vale 5 minutos por padrão (`STORAGE_SIGNED_URL_SECONDS`) e não deve ser guardado. O acesso do Administrador entra com o fluxo de validação.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Link temporário
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url: { type: string }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404':
+          description: '`NOT_FOUND`: documento inexistente ou de outro usuário (mesma resposta, para não revelar que existe). `USER_NOT_FOUND`: usuário não encontrado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/me/host/photos:
+    post:
+      tags: [Host]
+      operationId: addHostPhoto
+      summary: Envia uma foto do cadastro do Host (#325)
+      description: |
+        Um arquivo por requisição, em rascunho do próprio usuário. O tipo é conferido pelo conteúdo do arquivo.
+        JPEG, PNG ou WebP, até 5 MB e até 10 fotos. A primeira vira a foto principal na submissão.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: Foto guardada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostPhoto' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404':
+          description: '`NOT_FOUND`: o usuário ainda não tem cadastro de Host. `USER_NOT_FOUND`: usuário não encontrado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409': { $ref: '#/components/responses/HostFileConflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/StorageUnavailable' }
+
   # Agenda do Host (#482): JWT do usuário → (JSON no POST) → controller (exige ser Host). O Host vem só do JWT.
   /api/v1/me/host/agenda:
     get:
@@ -961,6 +1056,20 @@ components:
         acceptedSizes: { type: array, items: { type: string, enum: [small, medium, large] } }
         acceptedBreeds: { type: array, description: Vazia = aceita todas as raças, items: { type: string, minLength: 1, maxLength: 100 } }
 
+    HostDocument:
+      type: object
+      required: [id, type]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [identity, proof_of_address, cnpj_card] }
+
+    HostPhoto:
+      type: object
+      required: [id, url]
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string, description: 'Pode ser um link temporário: não guardar para usar depois' }
+
     HostProfile:
       type: object
       required: [id, validationStatus, providerType, name, description, cpfCnpjMasked, address, acceptedSpecies, acceptedSizes, acceptedBreeds, documents, photos]
@@ -978,22 +1087,8 @@ components:
         acceptedSpecies: { type: array, items: { type: string } }
         acceptedSizes: { type: array, items: { type: string } }
         acceptedBreeds: { type: array, items: { type: string } }
-        documents:
-          type: array
-          items:
-            type: object
-            required: [id, type]
-            properties:
-              id: { type: string, format: uuid }
-              type: { type: string, enum: [identity, proof_of_address, cnpj_card] }
-        photos:
-          type: array
-          items:
-            type: object
-            required: [id, url]
-            properties:
-              id: { type: string, format: uuid }
-              url: { type: string, description: 'Pode ser um link temporário: não guardar para usar depois' }
+        documents: { type: array, items: { $ref: '#/components/schemas/HostDocument' } }
+        photos: { type: array, items: { $ref: '#/components/schemas/HostPhoto' } }
 
     HostDetails:
       type: object
@@ -1187,6 +1282,16 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
           example: { code: HOST_REQUIRED, message: Apenas Hosts acessam as solicitações recebidas. }
+    HostFileConflict:
+      description: '`HOST_ALREADY_SUBMITTED`: o cadastro já foi enviado e não aceita arquivos. `FILE_LIMIT_REACHED`: limite de arquivos atingido'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    StorageUnavailable:
+      description: '`STORAGE_UNAVAILABLE`: o armazenamento de arquivos falhou. Pode tentar de novo'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     ReservationNotFound:
       description: '`NOT_FOUND`: solicitação inexistente ou de outro Host (mesma resposta, para não revelar que existe)'
       content:

@@ -660,7 +660,7 @@ GET /api/v1/me/host/agenda?startDate=2026-11-10&endDate=2026-11-13
 - Sem recorrência ("toda segunda") nem horário de funcionamento (`provider_working_hours`).
 - Desbloqueio é por dia; desbloqueio por intervalo fica para quando o app precisar.
 
-## Cadastro do Host: `PUT` e `GET /api/v1/me/host` e `POST /api/v1/me/host/submit`
+## Cadastro do Host: `/api/v1/me/host`
 
 Rotas usadas por quem quer ser Host (Task #325, HSP-PBI-008-TSK-05). Contrato completo em `docs/openapi.yaml`.
 
@@ -670,17 +670,22 @@ Rotas usadas por quem quer ser Host (Task #325, HSP-PBI-008-TSK-05). Contrato co
 
 1. `PUT /api/v1/me/host` salva o rascunho (`validation_status = draft`). A primeira chamada cria o prestador. `providerType` e `name` são sempre exigidos; campo omitido fica como está.
 2. `GET /api/v1/me/host` devolve o cadastro para o app retomar de onde parou. CPF ou CNPJ volta mascarado, e a chave dos documentos nunca sai.
-3. `POST /api/v1/me/host/submit` confere o cadastro. Se faltar algo, devolve `400` com tudo o que falta e nada muda. Se estiver completo, o perfil fica `pending` e a primeira foto vira a principal.
+3. `POST /api/v1/me/host/documents` (campos `type` e `file`) e `POST /api/v1/me/host/photos` (campo `file`), em `multipart/form-data`, enviam um arquivo por requisição. O app não fala com o bucket: o back-end valida e grava.
+4. `GET /api/v1/me/host/documents/{id}` devolve o link temporário do documento, só para o titular.
+5. `POST /api/v1/me/host/submit` confere o cadastro. Se faltar algo, devolve `400` com tudo o que falta e nada muda. Se estiver completo, o perfil fica `pending` e a primeira foto vira a principal.
 
 **Regras:**
 
 - Só `approved` aparece na busca e nos detalhes públicos. `draft` e `pending` ficam de fora.
 - Depois de enviado, o cadastro não edita mais: `409 HOST_ALREADY_SUBMITTED`.
+- O tipo do arquivo é conferido pelo conteúdo. Documentos: PDF, JPEG ou PNG, até 10 MB e 5 arquivos por tipo. Fotos: JPEG, PNG ou WebP, até 5 MB e 10 fotos.
+- Se o banco falhar depois do upload, o arquivo é apagado do bucket.
 - Quem só tem rascunho ainda não acessa as rotas de Host (`403 HOST_REQUIRED`). Quem já enviou acessa.
 
 **Pendências:**
 
-- As rotas de envio de documentos e fotos ainda não existem: sem elas, o `submit` não fica completo pelo app.
+- Administrador ainda não acessa os documentos: depende do fluxo de validação.
+- Não há rota para apagar um arquivo enviado errado.
 - \[assunção\] Só `providerType = hotel` e documentos obrigatórios `identity` e `proof_of_address`, mais `cnpj_card` para CNPJ: a #321, que fecharia isso, foi removida. Validar com a PO.
 - Capacidade (`hotel_details`) e serviços ainda não entram no cadastro. Sem um serviço ativo, o Host aprovado não aparece na busca.
 - Reenvio de cadastro rejeitado depende do fluxo de aprovação.
@@ -721,10 +726,10 @@ O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, amb
 ├── index.js            # Carrega o ambiente e chama .listen() — ponto de entrada real
 ├── src/
 │   ├── app.js          # Exporta a aplicação Express e registra as rotas (sem subir servidor)
-│   ├── lib/            # prisma.js (instância única do Prisma Client), app-error.js, jwt.js, cpf.js
+│   ├── lib/            # prisma.js (instância única do Prisma Client), app-error.js, jwt.js, cpf.js, address.js, cnpj.js, storage.js e fake-storage.js (bucket de arquivos)
 │   ├── contracts/      # controller e service provisórios das rotas de contratação (respondem 501)
-│   ├── hosts/          # controller e service dos detalhes públicos do Host e regras do Host (host-policy.js)
-│   ├── middlewares/    # service-token.js (rota interna), user-token.js (JWT do usuário), can-contract.js (guarda de contratação)
+│   ├── hosts/          # controller e service dos detalhes públicos do Host e regras do Host (host-policy.js); cadastro do Host (host-profile.*, host-files.*)
+│   ├── middlewares/    # service-token.js (rota interna), user-token.js (JWT do usuário), can-contract.js (guarda de contratação), upload-file.js (arquivo em multipart)
 │   ├── tutors/         # controller e service da conclusão do perfil do Tutor
 │   ├── pets/           # controller, service e domínios (pet-policy.js) dos pets do Tutor
 │   ├── reservations/   # controllers e services da solicitação de hospedagem, da lista e da decisão do Host
