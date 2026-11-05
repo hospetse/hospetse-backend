@@ -21,7 +21,7 @@ export async function requireUser(req, res, next) {
     // sub = authUserId, gravado em users.auth_user_id pelo provisionamento (TSK-03); o address entra para o missingFields
     const user = await prisma.user.findUnique({
         where: { authUserId: sub },
-        include: { tutor: { include: { address: true } }, provider: { select: { id: true } } },
+        include: { tutor: { include: { address: true } }, provider: { select: { id: true, validationStatus: true } } },
     });
     if (!user) {
         return res.status(404).json({ code: 'USER_NOT_FOUND', message: 'Usuário não encontrado' });

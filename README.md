@@ -660,6 +660,31 @@ GET /api/v1/me/host/agenda?startDate=2026-11-10&endDate=2026-11-13
 - Sem recorrência ("toda segunda") nem horário de funcionamento (`provider_working_hours`).
 - Desbloqueio é por dia; desbloqueio por intervalo fica para quando o app precisar.
 
+## Cadastro do Host: `PUT` e `GET /api/v1/me/host` e `POST /api/v1/me/host/submit`
+
+Rotas usadas por quem quer ser Host (Task #325, HSP-PBI-008-TSK-05). Contrato completo em `docs/openapi.yaml`.
+
+**Autenticação:** igual ao `/me`. O dono vem só do JWT, então um usuário nunca alcança o cadastro de outro.
+
+**Fluxo:**
+
+1. `PUT /api/v1/me/host` salva o rascunho (`validation_status = draft`). A primeira chamada cria o prestador. `providerType` e `name` são sempre exigidos; campo omitido fica como está.
+2. `GET /api/v1/me/host` devolve o cadastro para o app retomar de onde parou. CPF ou CNPJ volta mascarado, e a chave dos documentos nunca sai.
+3. `POST /api/v1/me/host/submit` confere o cadastro. Se faltar algo, devolve `400` com tudo o que falta e nada muda. Se estiver completo, o perfil fica `pending` e a primeira foto vira a principal.
+
+**Regras:**
+
+- Só `approved` aparece na busca e nos detalhes públicos. `draft` e `pending` ficam de fora.
+- Depois de enviado, o cadastro não edita mais: `409 HOST_ALREADY_SUBMITTED`.
+- Quem só tem rascunho ainda não acessa as rotas de Host (`403 HOST_REQUIRED`). Quem já enviou acessa.
+
+**Pendências:**
+
+- As rotas de envio de documentos e fotos ainda não existem: sem elas, o `submit` não fica completo pelo app.
+- \[assunção\] Só `providerType = hotel` e documentos obrigatórios `identity` e `proof_of_address`, mais `cnpj_card` para CNPJ: a #321, que fecharia isso, foi removida. Validar com a PO.
+- Capacidade (`hotel_details`) e serviços ainda não entram no cadastro. Sem um serviço ativo, o Host aprovado não aparece na busca.
+- Reenvio de cadastro rejeitado depende do fluxo de aprovação.
+
 ## Deploy (Railway)
 
 O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, ambiente `production`): https://backend-production-7298.up.railway.app. URLs e contratos para o Mobile estão na wiki, em Index/Desenvolvimento/Back-end/APIs publicadas - URLs e contratos.

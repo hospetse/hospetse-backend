@@ -8,6 +8,7 @@ import { requireUser } from './middlewares/user-token.js';
 import { meController } from './users/me.controller.js';
 import { tutorProfileController } from './tutors/tutor-profile.controller.js';
 import { hostDetailsController } from './hosts/host-details.controller.js';
+import { getHostProfileController, saveHostDraftController, submitHostProfileController } from './hosts/host-profile.controller.js';
 import { searchHostsController } from './hosts/host-search.controller.js';
 import { blockPeriodController, getAgendaController, unblockDayController } from './hosts/agenda.controller.js';
 import { requireCanContract } from './middlewares/can-contract.js';
@@ -97,6 +98,11 @@ app.get('/api/v1/me/host/reservations', listHostReservationsController);
 // Decisão do Host sobre a solicitação (HSP-PBI-042-TSK-01 #491). Ordem: JWT do usuário → (JSON, na recusa) → controller (exige ser Host).
 app.post('/api/v1/me/host/reservations/:id/accept', acceptHostReservationController);
 app.post('/api/v1/me/host/reservations/:id/reject', express.json(), rejectHostReservationController);
+
+// Cadastro do Host (HSP-PBI-008-TSK-05 #325). Ordem: JWT do usuário → (JSON no PUT) → controller. O dono vem só do JWT.
+app.put('/api/v1/me/host', express.json(), saveHostDraftController);
+app.get('/api/v1/me/host', getHostProfileController);
+app.post('/api/v1/me/host/submit', submitHostProfileController);
 
 // Agenda do Host (HSP-PBI-036-TSK-01 #482). Ordem: JWT do usuário → (JSON no POST) → controller (exige ser Host).
 app.get('/api/v1/me/host/agenda', getAgendaController);

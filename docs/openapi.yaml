@@ -507,6 +507,87 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  # Cadastro do Host (#325): JWT do usuário → (JSON no PUT) → controller. O dono vem só do JWT.
+  /api/v1/me/host:
+    put:
+      tags: [Host]
+      operationId: saveHostDraft
+      summary: Salva o rascunho do cadastro do Host (#325)
+      description: |
+        A primeira chamada cria o rascunho (`draft`) e as seguintes atualizam. `providerType` e `name` são sempre exigidos;
+        os outros campos, quando omitidos, ficam como estão. Rascunho não aparece nas consultas públicas nem dá acesso às rotas de Host.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HostDraftInput' }
+      responses:
+        '200':
+          description: Rascunho salvo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostProfile' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '409':
+          description: '`HOST_ALREADY_SUBMITTED`: o cadastro já foi enviado e não edita mais. `HOST_DRAFT_CONFLICT`: dois primeiros envios ao mesmo tempo'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    get:
+      tags: [Host]
+      operationId: getHostProfile
+      summary: Cadastro do Host do próprio usuário (#325)
+      description: Para o app retomar o rascunho e mostrar a situação da validação. CPF ou CNPJ volta mascarado; a chave dos documentos nunca sai.
+      responses:
+        '200':
+          description: Cadastro do usuário
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostProfile' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404':
+          description: '`NOT_FOUND`: o usuário ainda não tem cadastro de Host. `USER_NOT_FOUND`: usuário não encontrado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/me/host/submit:
+    post:
+      tags: [Host]
+      operationId: submitHostProfile
+      summary: Envia o rascunho para validação (#325)
+      description: |
+        Exige descrição, CPF ou CNPJ, endereço, ao menos uma espécie e um porte, ao menos uma foto e os documentos `identity` e
+        `proof_of_address`, além de `cnpj_card` quando for CNPJ. O perfil fica `pending`, fora das consultas públicas até a aprovação,
+        e a primeira foto vira a principal. Sem body.
+      responses:
+        '200':
+          description: Cadastro enviado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostProfile' }
+        '400':
+          description: Tudo o que falta no cadastro; o rascunho não muda
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404':
+          description: '`NOT_FOUND`: o usuário ainda não tem cadastro de Host. `USER_NOT_FOUND`: usuário não encontrado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`HOST_ALREADY_SUBMITTED`: o cadastro já foi enviado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   # Agenda do Host (#482): JWT do usuário → (JSON no POST) → controller (exige ser Host). O Host vem só do JWT.
   /api/v1/me/host/agenda:
     get:
@@ -848,6 +929,71 @@ components:
           properties:
             rating: { type: [number, 'null'], example: 4.5 }
             reviewCount: { type: integer, example: 12 }
+
+    HostAddress:
+      type: object
+      additionalProperties: false
+      required: [zipCode, street, number, neighborhood, city, state]
+      properties:
+        zipCode:
+          type: string
+          pattern: '^\d{5}-?\d{3}$'
+          description: Com ou sem hífen; gravado sem
+          example: 01001-000
+        street: { type: string, minLength: 1, maxLength: 255 }
+        number: { type: string, minLength: 1, maxLength: 20 }
+        complement: { type: [string, 'null'], maxLength: 100 }
+        neighborhood: { type: string, minLength: 1, maxLength: 100 }
+        city: { type: string, minLength: 1, maxLength: 100 }
+        state: { type: string, pattern: '^[A-Za-z]{2}$', example: SP }
+
+    HostDraftInput:
+      type: object
+      additionalProperties: false
+      required: [providerType, name]
+      properties:
+        providerType: { type: string, enum: [hotel] }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        cpfCnpj: { type: [string, 'null'], description: CPF ou CNPJ válido e ainda não usado por outro prestador; com ou sem pontuação }
+        address: { $ref: '#/components/schemas/HostAddress' }
+        acceptedSpecies: { type: array, items: { type: string, enum: [dog, cat] } }
+        acceptedSizes: { type: array, items: { type: string, enum: [small, medium, large] } }
+        acceptedBreeds: { type: array, description: Vazia = aceita todas as raças, items: { type: string, minLength: 1, maxLength: 100 } }
+
+    HostProfile:
+      type: object
+      required: [id, validationStatus, providerType, name, description, cpfCnpjMasked, address, acceptedSpecies, acceptedSizes, acceptedBreeds, documents, photos]
+      properties:
+        id: { type: string, format: uuid }
+        validationStatus: { type: string, enum: [draft, pending, approved, rejected] }
+        providerType: { type: string, enum: [hotel] }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        cpfCnpjMasked: { type: [string, 'null'], description: Só os 4 últimos dígitos, example: '***4725' }
+        address:
+          oneOf:
+            - { $ref: '#/components/schemas/HostAddress' }
+            - { type: 'null' }
+        acceptedSpecies: { type: array, items: { type: string } }
+        acceptedSizes: { type: array, items: { type: string } }
+        acceptedBreeds: { type: array, items: { type: string } }
+        documents:
+          type: array
+          items:
+            type: object
+            required: [id, type]
+            properties:
+              id: { type: string, format: uuid }
+              type: { type: string, enum: [identity, proof_of_address, cnpj_card] }
+        photos:
+          type: array
+          items:
+            type: object
+            required: [id, url]
+            properties:
+              id: { type: string, format: uuid }
+              url: { type: string, description: 'Pode ser um link temporário: não guardar para usar depois' }
 
     HostDetails:
       type: object

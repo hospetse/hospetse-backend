@@ -7,6 +7,10 @@ test('requireHost: USER sem provider recebe 403 HOST_REQUIRED', () => {
     assert.throws(() => requireHost({ provider: null }), { statusCode: 403, code: 'HOST_REQUIRED' });
 });
 
+test('requireHost: rascunho ainda não é Host', () => {
+    assert.throws(() => requireHost({ provider: { id: 'p1', validationStatus: 'draft' } }), { statusCode: 403, code: 'HOST_REQUIRED' });
+});
+
 test('requireHost: USER com provider recebe o Host de volta, mesmo sendo também Tutor', () => {
     const provider = { id: 'p1' };
     assert.strictEqual(requireHost({ provider, tutor: { id: 't1' } }), provider);
