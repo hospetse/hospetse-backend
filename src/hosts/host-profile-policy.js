@@ -6,6 +6,11 @@ import { PET_SIZES, PET_SPECIES } from '../pets/pet-policy.js';
 // shortcut: só hospedagem, único tipo que a busca mostra; abrir para pet_sitter e pet_walker quando houver fluxo deles.
 export const HOST_TYPES = ['hotel'];
 
+// Mesmos valores do CHECK de provider_documents.type (#323)
+export const DOCUMENT_TYPES = ['identity', 'proof_of_address', 'cnpj_card'];
+export const MAX_DOCUMENTS_PER_TYPE = 5;
+export const MAX_PHOTOS = 10;
+
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const isText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.trim().length <= max;
 const isCnpj = (cpfCnpj) => cpfCnpj?.length === 14;

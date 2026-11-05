@@ -3,7 +3,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { AppError } from './app-error.js';
 
 const MB = 1024 * 1024;
-const FILE_RULES = {
+export const FILE_RULES = {
     document: { maxBytes: 10 * MB, maxLabel: '10 MB', types: ['application/pdf', 'image/jpeg', 'image/png'], typesLabel: 'PDF, JPEG ou PNG' },
     photo: { maxBytes: 5 * MB, maxLabel: '5 MB', types: ['image/jpeg', 'image/png', 'image/webp'], typesLabel: 'JPEG, PNG ou WebP' },
 };
@@ -20,10 +20,12 @@ export function detectFileType(buffer) {
     return null;
 }
 
+export const fileTooLargeMessage = (kind) => `O arquivo passa do limite de ${FILE_RULES[kind].maxLabel}`;
+
 // Devolve o motivo da recusa ou null. Não lança, para a rota juntar os erros de todos os campos em VALIDATION_ERROR.
 export function fileProblem(kind, buffer) {
     const rules = FILE_RULES[kind];
-    if (buffer.length > rules.maxBytes) return `O arquivo passa do limite de ${rules.maxLabel}`;
+    if (buffer.length > rules.maxBytes) return fileTooLargeMessage(kind);
     if (!rules.types.includes(detectFileType(buffer))) return `Tipo de arquivo não permitido. Envie ${rules.typesLabel}`;
     return null;
 }
@@ -66,10 +68,19 @@ export class S3Storage {
 
 let storage;
 
+// criado no primeiro uso: quem só tem URL externa não depende das variáveis S3_*
+export function getStorage() {
+    storage ??= new S3Storage();
+    return storage;
+}
+
+// Os testes trocam pelo FakeStorage, para não usar a rede
+export function useStorage(implementation) {
+    storage = implementation;
+}
+
 // Colunas de foto do Host guardam a chave no bucket ou uma URL externa (seed). Só para fotos: documento não passa por aqui.
 export async function publicFileUrl(value) {
     if (!value || /^https?:\/\//i.test(value)) return value;
-    // criado no primeiro uso: quem só tem URL externa não depende das variáveis S3_*
-    storage ??= new S3Storage();
-    return storage.signedUrl(value, PHOTO_URL_SECONDS);
+    return getStorage().signedUrl(value, PHOTO_URL_SECONDS);
 }

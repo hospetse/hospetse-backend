@@ -9,6 +9,8 @@ import { meController } from './users/me.controller.js';
 import { tutorProfileController } from './tutors/tutor-profile.controller.js';
 import { hostDetailsController } from './hosts/host-details.controller.js';
 import { getHostProfileController, saveHostDraftController, submitHostProfileController } from './hosts/host-profile.controller.js';
+import { addHostDocumentController, addHostPhotoController, hostDocumentLinkController } from './hosts/host-files.controller.js';
+import { uploadFile } from './middlewares/upload-file.js';
 import { searchHostsController } from './hosts/host-search.controller.js';
 import { blockPeriodController, getAgendaController, unblockDayController } from './hosts/agenda.controller.js';
 import { requireCanContract } from './middlewares/can-contract.js';
@@ -103,6 +105,11 @@ app.post('/api/v1/me/host/reservations/:id/reject', express.json(), rejectHostRe
 app.put('/api/v1/me/host', express.json(), saveHostDraftController);
 app.get('/api/v1/me/host', getHostProfileController);
 app.post('/api/v1/me/host/submit', submitHostProfileController);
+
+// Arquivos do cadastro do Host (#325). Ordem: JWT do usuário → leitura do arquivo (no POST) → controller. O dono vem só do JWT.
+app.post('/api/v1/me/host/documents', uploadFile('document'), addHostDocumentController);
+app.post('/api/v1/me/host/photos', uploadFile('photo'), addHostPhotoController);
+app.get('/api/v1/me/host/documents/:id', hostDocumentLinkController);
 
 // Agenda do Host (HSP-PBI-036-TSK-01 #482). Ordem: JWT do usuário → (JSON no POST) → controller (exige ser Host).
 app.get('/api/v1/me/host/agenda', getAgendaController);
