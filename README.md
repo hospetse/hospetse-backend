@@ -83,6 +83,8 @@ Variáveis disponíveis (ver `.env.example` para a lista completa e atualizada):
 | `JWT_PUBLIC_KEY` | Chave pública RS256 do Auth Server (PEM, entre aspas), usada para validar o access token em [`GET /api/v1/me`](#estado-do-usuário-get-apiv1me). Mesmo valor da `JWT_PUBLIC_KEY` do Auth | valor mantido apenas no `.env` |
 | `INTERNAL_SERVICE_TOKEN` | Segredo compartilhado com o Auth Server, exigido na [rota interna de provisionamento](#rota-interna-de-provisionamento-do-user). Mesmo valor nos dois serviços, diferente por ambiente | valor mantido apenas no `.env` |
 | `CORS_ORIGINS` | Origens do navegador liberadas no CORS, separadas por vírgula e sem barra no fim. Vazio bloqueia todas. Precisa estar no Railway para a web local chamar o back-end | `http://localhost:8081` |
+| `S3_BUCKET`, `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Acesso ao bucket privado do Railway, onde ficam documentos e fotos do Host. Copiar da aba Credentials do bucket | valores mantidos apenas no `.env` |
+| `STORAGE_SIGNED_URL_SECONDS` | Opcional. Validade dos links temporários de arquivos, em segundos. Padrão: `300` | `300` |
 
 > O arquivo `.env` nunca deve ser commitado (já está no `.gitignore`). Segredos e configuração de ambiente ficam só localmente ou no painel da plataforma de deploy.
 
