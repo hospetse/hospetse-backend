@@ -225,6 +225,7 @@ test('do rascunho ao envio pelas rotas; depois disso, não aceita arquivo e o ti
         description: 'Casa com quintal',
         cpfCnpj: '52998224725',
         address: { zipCode: '01001000', street: 'Rua Teste', number: '1', neighborhood: 'Centro', city: `it-arquivos-${randomUUID()}`, state: 'SP' },
+        capacity: 5,
         acceptedSpecies: ['dog'],
         acceptedSizes: ['small'],
     });

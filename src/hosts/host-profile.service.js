@@ -9,6 +9,7 @@ const cpfCnpjTaken = { field: 'cpfCnpj', message: 'CPF ou CNPJ já cadastrado' }
 // storage_key fica de fora: documento só sai por link assinado
 const PROFILE_INCLUDE = {
     address: true,
+    hotelDetail: { select: { capacity: true } },
     documents: { select: { id: true, type: true }, orderBy: { createdAt: 'asc' } },
     photos: { select: { id: true, url: true }, orderBy: { createdAt: 'asc' } },
 };
@@ -26,7 +27,7 @@ export async function findHostProfileService(user) {
 }
 
 // Rascunho do cadastro: a primeira chamada cria o Provider e as seguintes atualizam. O dono vem só do JWT.
-export async function saveHostDraftService(user, { address, ...data }) {
+export async function saveHostDraftService(user, { address, capacity, ...data }) {
     try {
         return await prisma.$transaction(async (tx) => {
             // Lido dentro da transação para não decidir com o estado antigo do req.user
@@ -44,11 +45,14 @@ export async function saveHostDraftService(user, { address, ...data }) {
                 addressId = saved.id;
             }
 
+            // A capacidade fica em hotel_details; omitida, não muda
             if (current) {
-                return tx.provider.update({ where: { id: current.id }, data: { ...data, addressId }, include: PROFILE_INCLUDE });
+                const hotelDetail = capacity === undefined ? undefined : { upsert: { create: { capacity }, update: { capacity } } };
+                return tx.provider.update({ where: { id: current.id }, data: { ...data, addressId, hotelDetail }, include: PROFILE_INCLUDE });
             }
+            const hotelDetail = capacity === undefined ? undefined : { create: { capacity } };
             return tx.provider.create({
-                data: { ...data, addressId, userId: user.id, validationStatus: 'draft' },
+                data: { ...data, addressId, hotelDetail, userId: user.id, validationStatus: 'draft' },
                 include: PROFILE_INCLUDE,
             });
         });

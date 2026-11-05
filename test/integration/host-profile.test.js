@@ -82,6 +82,7 @@ const complete = (overrides = {}) => ({
     description: 'Casa com quintal',
     cpfCnpj: randomCpf(),
     address: address(),
+    capacity: 5,
     acceptedSpecies: ['dog'],
     acceptedSizes: ['small', 'medium'],
     acceptedBreeds: [],
@@ -147,6 +148,27 @@ test('atualizar o endereço não cria outro', async () => {
     assert.strictEqual(res.data.address.street, 'Rua Nova');
     const updated = await prisma.provider.findUnique({ where: { userId: user.id } });
     assert.strictEqual(updated.addressId, addressId);
+});
+
+test('capacidade: grava na primeira chamada, atualiza e, omitida, não muda', async () => {
+    const { user, headers } = await newUser();
+    const saved = async () => (await prisma.hotelDetail.findFirst({ where: { provider: { userId: user.id } } })).capacity;
+
+    const created = await put({ ...minimal, capacity: 3 }, headers);
+    assert.strictEqual(created.data.capacity, 3);
+    assert.strictEqual(await saved(), 3);
+
+    assert.strictEqual((await put({ ...minimal, capacity: 7 }, headers)).data.capacity, 7);
+    assert.strictEqual(await saved(), 7);
+
+    assert.strictEqual((await put(minimal, headers)).data.capacity, 7);
+});
+
+test('capacidade adicionada depois do primeiro rascunho', async () => {
+    const { headers } = await newUser();
+    assert.strictEqual((await put(minimal, headers)).data.capacity, null);
+    assert.strictEqual((await put({ ...minimal, capacity: 2 }, headers)).data.capacity, 2);
+    assert.strictEqual((await get(headers)).data.capacity, 2);
 });
 
 test('PUT inválido lista todos os erros e não cria nada', async () => {
@@ -237,7 +259,7 @@ test('enviar rascunho incompleto lista tudo o que falta e continua rascunho', as
     assert.strictEqual(res.status, 400);
     assert.strictEqual(res.data.code, 'VALIDATION_ERROR');
     const fields = res.data.details.map((detail) => detail.field);
-    for (const field of ['description', 'cpfCnpj', 'address', 'acceptedSpecies', 'acceptedSizes', 'photos', 'documents.identity', 'documents.proof_of_address']) {
+    for (const field of ['description', 'cpfCnpj', 'address', 'capacity', 'acceptedSpecies', 'acceptedSizes', 'photos', 'documents.identity', 'documents.proof_of_address']) {
         assert.ok(fields.includes(field), field);
     }
     const saved = await prisma.provider.findUnique({ where: { userId: user.id } });

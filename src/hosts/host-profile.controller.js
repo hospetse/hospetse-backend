@@ -30,6 +30,7 @@ async function toResponse(provider) {
             city: address.city,
             state: address.state,
         },
+        capacity: provider.hotelDetail?.capacity ?? null,
         acceptedSpecies: provider.acceptedSpecies,
         acceptedSizes: provider.acceptedSizes,
         acceptedBreeds: provider.acceptedBreeds,

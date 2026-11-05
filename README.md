@@ -687,7 +687,8 @@ Rotas usadas por quem quer ser Host (Task #325, HSP-PBI-008-TSK-05). Contrato co
 - Administrador ainda não acessa os documentos: depende do fluxo de validação.
 - Não há rota para apagar um arquivo enviado errado.
 - \[assunção\] Só `providerType = hotel` e documentos obrigatórios `identity` e `proof_of_address`, mais `cnpj_card` para CNPJ: a #321, que fecharia isso, foi removida. Validar com a PO.
-- Capacidade (`hotel_details`) e serviços ainda não entram no cadastro. Sem um serviço ativo, o Host aprovado não aparece na busca.
+- Serviços ainda não entram no cadastro. Sem um serviço ativo, o Host aprovado não aparece na busca.
+- \[assunção\] A "estrutura" do HSP-PBI-008-AC-01 fica na `description`, porque não tem campo próprio. Validar com a PO.
 - Reenvio de cadastro rejeitado depende do fluxo de aprovação.
 
 ## Deploy (Railway)

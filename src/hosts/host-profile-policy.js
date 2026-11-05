@@ -10,6 +10,8 @@ export const HOST_TYPES = ['hotel'];
 export const DOCUMENT_TYPES = ['identity', 'proof_of_address', 'cnpj_card'];
 export const MAX_DOCUMENTS_PER_TYPE = 5;
 export const MAX_PHOTOS = 10;
+// [assunção] teto só para barrar valor absurdo; o card não define
+export const MAX_CAPACITY = 1000;
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const isText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.trim().length <= max;
@@ -22,7 +24,7 @@ function listProblem(field, value, allowed, invalid) {
 
 // Valida o PUT do rascunho e devolve os dados no formato gravado. Campo omitido fica como está; só name e providerType são sempre exigidos.
 export function parseHostDraft(body) {
-    const { providerType, name, description, cpfCnpj, address, acceptedSpecies, acceptedSizes, acceptedBreeds, ...extra } = body ?? {};
+    const { providerType, name, description, cpfCnpj, address, capacity, acceptedSpecies, acceptedSizes, acceptedBreeds, ...extra } = body ?? {};
 
     const details = [];
     const invalid = (field, message) => details.push({ field, message });
@@ -39,6 +41,10 @@ export function parseHostDraft(body) {
     if (address !== undefined) {
         if (isObject(address)) addressProblems(address, invalid);
         else invalid('address', 'deve ter todos os campos do endereço');
+    }
+
+    if (capacity !== undefined && (!Number.isInteger(capacity) || capacity < 1 || capacity > MAX_CAPACITY)) {
+        invalid('capacity', `inteiro de 1 a ${MAX_CAPACITY}`);
     }
 
     if (acceptedSpecies !== undefined) listProblem('acceptedSpecies', acceptedSpecies, (item) => PET_SPECIES.includes(item), invalid);
@@ -58,6 +64,7 @@ export function parseHostDraft(body) {
             name: name.trim(),
             description: description === undefined ? undefined : description?.trim() ?? null,
             cpfCnpj: cleanCpfCnpj,
+            capacity,
             acceptedSpecies,
             acceptedSizes,
             acceptedBreeds: acceptedBreeds?.map((breed) => breed.trim()),
@@ -66,7 +73,7 @@ export function parseHostDraft(body) {
     };
 }
 
-// O que falta para o rascunho ir à validação. provider vem com address, documents e photos.
+// O que falta para o rascunho ir à validação. provider vem com address, hotelDetail, documents e photos.
 export function submissionProblems(provider) {
     const details = [];
     const invalid = (field, message) => details.push({ field, message });
@@ -78,6 +85,7 @@ export function submissionProblems(provider) {
     if (!provider.description) invalid('description', 'obrigatório');
     if (!provider.cpfCnpj) invalid('cpfCnpj', 'obrigatório');
     if (!provider.address) invalid('address', 'obrigatório');
+    if (!provider.hotelDetail?.capacity) invalid('capacity', 'obrigatório');
     if (!provider.acceptedSpecies.length) invalid('acceptedSpecies', 'escolha ao menos uma espécie');
     if (!provider.acceptedSizes.length) invalid('acceptedSizes', 'escolha ao menos um porte');
     if (!provider.photos.length) invalid('photos', 'envie ao menos uma foto');

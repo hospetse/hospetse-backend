@@ -12,6 +12,7 @@ const completeProvider = (overrides = {}) => ({
     description: 'Casa com quintal',
     cpfCnpj: CPF,
     address: { city: 'São Paulo' },
+    hotelDetail: { capacity: 5 },
     acceptedSpecies: ['dog'],
     acceptedSizes: ['small'],
     photos: [{ id: 'f1', url: 'photos/1.jpg' }],
@@ -27,7 +28,7 @@ test('rascunho mínimo: só providerType e name', () => {
 
 test('campo omitido fica undefined, para não apagar o que já foi salvo', () => {
     const { data } = parseHostDraft({ providerType: 'hotel', name: 'Hotelzinho' });
-    for (const field of ['description', 'cpfCnpj', 'address', 'acceptedSpecies', 'acceptedSizes', 'acceptedBreeds']) {
+    for (const field of ['description', 'cpfCnpj', 'address', 'capacity', 'acceptedSpecies', 'acceptedSizes', 'acceptedBreeds']) {
         assert.strictEqual(data[field], undefined, field);
     }
 });
@@ -59,6 +60,19 @@ test('body vazio pede os dois campos obrigatórios', () => {
     assert.deepStrictEqual(fields(parseHostDraft(undefined).details), ['providerType', 'name']);
 });
 
+test('capacidade: inteiro de 1 a 1000', () => {
+    const base = { providerType: 'hotel', name: 'Hotelzinho' };
+    assert.strictEqual(parseHostDraft({ ...base, capacity: 1 }).data.capacity, 1);
+    assert.strictEqual(parseHostDraft({ ...base, capacity: 1000 }).data.capacity, 1000);
+    for (const capacity of [0, -1, 1001, 1.5, '5', null]) {
+        assert.deepStrictEqual(fields(parseHostDraft({ ...base, capacity }).details), ['capacity'], String(capacity));
+    }
+});
+
+test('rascunho sem capacidade não é enviado', () => {
+    assert.deepStrictEqual(fields(submissionProblems(completeProvider({ hotelDetail: { capacity: null } }))), ['capacity']);
+});
+
 test('CPF e CNPJ com pontuação são gravados só com dígitos', () => {
     const base = { providerType: 'hotel', name: 'Hotelzinho' };
     assert.strictEqual(parseHostDraft({ ...base, cpfCnpj: '529.982.247-25' }).data.cpfCnpj, CPF);
@@ -81,10 +95,10 @@ test('cadastro completo com CPF pode ser enviado', () => {
 
 test('rascunho vazio lista tudo o que falta', () => {
     const problems = submissionProblems({
-        description: null, cpfCnpj: null, address: null, acceptedSpecies: [], acceptedSizes: [], photos: [], documents: [],
+        description: null, cpfCnpj: null, address: null, hotelDetail: null, acceptedSpecies: [], acceptedSizes: [], photos: [], documents: [],
     });
     assert.deepStrictEqual(fields(problems), [
-        'description', 'cpfCnpj', 'address', 'acceptedSpecies', 'acceptedSizes', 'photos', 'documents.identity', 'documents.proof_of_address',
+        'description', 'cpfCnpj', 'address', 'capacity', 'acceptedSpecies', 'acceptedSizes', 'photos', 'documents.identity', 'documents.proof_of_address',
     ]);
 });
 

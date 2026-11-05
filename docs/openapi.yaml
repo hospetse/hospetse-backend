@@ -561,7 +561,7 @@ paths:
       operationId: submitHostProfile
       summary: Envia o rascunho para validação (#325)
       description: |
-        Exige descrição, CPF ou CNPJ, endereço, ao menos uma espécie e um porte, ao menos uma foto e os documentos `identity` e
+        Exige descrição, CPF ou CNPJ, endereço, capacidade, ao menos uma espécie e um porte, ao menos uma foto e os documentos `identity` e
         `proof_of_address`, além de `cnpj_card` quando for CNPJ. O perfil fica `pending`, fora das consultas públicas até a aprovação,
         e a primeira foto vira a principal. Sem body.
       responses:
@@ -1052,6 +1052,7 @@ components:
         description: { type: [string, 'null'], maxLength: 2000 }
         cpfCnpj: { type: [string, 'null'], description: CPF ou CNPJ válido e ainda não usado por outro prestador; com ou sem pontuação }
         address: { $ref: '#/components/schemas/HostAddress' }
+        capacity: { type: integer, minimum: 1, maximum: 1000, description: Quantos pets o hotel recebe ao mesmo tempo. Usada na agenda e na busca }
         acceptedSpecies: { type: array, items: { type: string, enum: [dog, cat] } }
         acceptedSizes: { type: array, items: { type: string, enum: [small, medium, large] } }
         acceptedBreeds: { type: array, description: Vazia = aceita todas as raças, items: { type: string, minLength: 1, maxLength: 100 } }
@@ -1072,7 +1073,7 @@ components:
 
     HostProfile:
       type: object
-      required: [id, validationStatus, providerType, name, description, cpfCnpjMasked, address, acceptedSpecies, acceptedSizes, acceptedBreeds, documents, photos]
+      required: [id, validationStatus, providerType, name, description, cpfCnpjMasked, address, capacity, acceptedSpecies, acceptedSizes, acceptedBreeds, documents, photos]
       properties:
         id: { type: string, format: uuid }
         validationStatus: { type: string, enum: [draft, pending, approved, rejected] }
@@ -1084,6 +1085,7 @@ components:
           oneOf:
             - { $ref: '#/components/schemas/HostAddress' }
             - { type: 'null' }
+        capacity: { type: [integer, 'null'] }
         acceptedSpecies: { type: array, items: { type: string } }
         acceptedSizes: { type: array, items: { type: string } }
         acceptedBreeds: { type: array, items: { type: string } }
