@@ -78,9 +78,10 @@ model Provider {
   cpfCnpj          String?                @unique @map("cpf_cnpj") @db.VarChar(18)
   addressId        String?                @unique @map("address_id") @db.Uuid
   rating           Decimal?               @db.Decimal(3, 2)
+  // Chave no bucket ou URL externa (seed). A API devolve sempre URL (publicFileUrl, #324)
   urlPicture       String?                @map("url_picture") @db.VarChar(2048)
   status           String                 @default("active") @db.VarChar(20)
-  // pending, approved ou rejected (HSP-PBI-008-TSK-03 #323): só approved aparece nas consultas públicas
+  // draft (rascunho, #325), pending, approved ou rejected (#323): só approved aparece nas consultas públicas
   validationStatus String                 @default("pending") @map("validation_status") @db.VarChar(20)
   description      String?                @db.VarChar(2000)
   // Restrições aceitas, com os mesmos valores de pets.pet_species/pet_size/pet_breed. Raças vazias = aceita todas
@@ -134,6 +135,7 @@ model Address {
 model ProviderPhoto {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   providerId String   @map("provider_id") @db.Uuid
+  // Chave no bucket ou URL externa (seed). A API devolve sempre URL (publicFileUrl, #324)
   url        String   @db.VarChar(2048)
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)

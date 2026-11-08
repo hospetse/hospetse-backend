@@ -20,6 +20,8 @@ if (!process.env.DATABASE_URL) {
 
 const { publicKey, privateKey } = await generateKeyPair('RS256');
 process.env.JWT_PUBLIC_KEY = await exportSPKI(publicKey);
+// Assinar não usa a rede: credenciais falsas bastam para testar o link
+Object.assign(process.env, { S3_BUCKET: 'bucket-teste', S3_ENDPOINT: 'https://storage.invalid', S3_REGION: 'auto', S3_ACCESS_KEY_ID: 'id-teste', S3_SECRET_ACCESS_KEY: 'segredo-teste' });
 
 const { default: app } = await import('../../src/app.js');
 const server = app.listen(0);
@@ -140,6 +142,17 @@ test('só Host elegível com serviço ativo; o item traz só dados públicos', a
         reputation: { rating: null, reviewCount: 0 },
     });
     assert.strictEqual(res.data.total, 1);
+});
+
+test('foto guardada no bucket: a busca traz link assinado, nunca a chave', async () => {
+    const city = newCity();
+    const { token } = await newUser();
+    await newHost(city, { urlPicture: 'photos/it-busca/perfil.jpg' });
+
+    const res = await search({ city }, token);
+
+    assert.strictEqual(res.status, 200);
+    assert.match(res.data.items[0].pictureUrl, /^https:.*photos\/it-busca\/perfil\.jpg\?.*X-Amz-Signature=/);
 });
 
 test('faixa de preço: só as diárias dentro dela', async () => {
