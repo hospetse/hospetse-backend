@@ -9,6 +9,7 @@ info:
     **Autenticação (#298):** tudo sob `/api/v1` é protegido por padrão, antes de chegar na rota.
     `/api/v1/internal/*` exige o token de serviço do Auth; o resto exige o JWT do usuário.
     Sem autenticação válida, qualquer caminho sob `/api/v1` responde `401`, inclusive os que não existem.
+    Sob `/api/v1/admin` (#313), usuário autenticado sem o papel Administrador responde `403`, inclusive nos caminhos que não existem.
 
     **Inventário das rotas públicas** (as únicas com `security: []`): `GET /health`, `GET /health/ready`,
     `GET /docs` (esta documentação) e `GET /docs/openapi.yaml` (este arquivo).
@@ -34,6 +35,8 @@ tags:
     description: Rotas do app, autenticadas pelo JWT do usuário
   - name: Host
     description: Consulta de Hosts pelo Tutor e rotas do próprio Host
+  - name: Administração
+    description: Exigem o papel Administrador (#313)
   - name: Contratação
     description: Exigem conta ativa e perfil complete (#263). service-requests e checkout seguem provisórias até as tasks de reserva e checkout
 
@@ -195,6 +198,28 @@ paths:
                         type: boolean
                         description: '`true` só com perfil complete e conta que não esteja blocked ou suspended'
         '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+
+  /api/v1/admin/me:
+    get:
+      tags: [Administração]
+      operationId: getAdminMe
+      summary: Confirma o papel Administrador do usuário autenticado (#313)
+      security:
+        - userJwt: []
+      responses:
+        '200':
+          description: Usuário com o papel Administrador
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, accountType]
+                properties:
+                  id: { type: string, format: uuid }
+                  accountType: { type: string, enum: [admin] }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotAdmin' }
         '404': { $ref: '#/components/responses/UserNotFound' }
 
   /api/v1/me/tutor-profile:
@@ -1284,6 +1309,12 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
           example: { code: HOST_REQUIRED, message: Apenas Hosts acessam as solicitações recebidas. }
+    NotAdmin:
+      description: '`ADMIN_REQUIRED`: o usuário não tem o papel Administrador'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { code: ADMIN_REQUIRED, message: Apenas Administradores acessam esta rota. }
     HostFileConflict:
       description: '`HOST_ALREADY_SUBMITTED`: o cadastro já foi enviado e não aceita arquivos. `FILE_LIMIT_REACHED`: limite de arquivos atingido'
       content:

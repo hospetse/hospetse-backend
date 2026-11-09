@@ -5,7 +5,7 @@ import { prisma } from './lib/prisma.js';
 import { requireServiceToken } from './middlewares/service-token.js';
 import { provisionUserController } from './users/internal-users.controller.js';
 import { requireUser } from './middlewares/user-token.js';
-import { meController } from './users/me.controller.js';
+import { adminMeController, meController } from './users/me.controller.js';
 import { tutorProfileController } from './tutors/tutor-profile.controller.js';
 import { hostDetailsController } from './hosts/host-details.controller.js';
 import { getHostProfileController, saveHostDraftController, submitHostProfileController } from './hosts/host-profile.controller.js';
@@ -14,6 +14,7 @@ import { uploadFile } from './middlewares/upload-file.js';
 import { searchHostsController } from './hosts/host-search.controller.js';
 import { blockPeriodController, getAgendaController, unblockDayController } from './hosts/agenda.controller.js';
 import { requireCanContract } from './middlewares/can-contract.js';
+import { requireAdmin } from './middlewares/admin-only.js';
 import { startContractController } from './contracts/contracts.controller.js';
 import { createPetController, listPetsController } from './pets/pet.controller.js';
 import { createReservationController } from './reservations/create-reservation.controller.js';
@@ -72,6 +73,12 @@ app.use('/api/v1', (req, res, next) =>
 // Só o POST: consultar ou cancelar o que já existe continua liberado para quem não pode mais contratar.
 const CONTRACT_PATHS = ['/api/v1/reservations', '/api/v1/service-requests', '/api/v1/checkout'];
 app.use(CONTRACT_PATHS, (req, res, next) => (req.method === 'POST' ? requireCanContract(req, res, next) : next()));
+
+// Área administrativa protegida por padrão (HSP-PBI-007-TSK-04 #313): sem o papel, 403 em qualquer caminho sob /admin.
+app.use('/api/v1/admin', requireAdmin);
+
+// Confirma o papel para a Web depois do login (#313). Ordem: JWT do usuário → papel Administrador → controller.
+app.get('/api/v1/admin/me', adminMeController);
 
 // Provisionamento do USER pelo Auth Server (TSK-01 #259). Ordem: token de serviço → leitura do JSON → controller.
 app.put('/api/v1/internal/users/:authUserId', express.json(), provisionUserController);
