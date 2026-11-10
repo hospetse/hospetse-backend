@@ -222,6 +222,114 @@ paths:
         '403': { $ref: '#/components/responses/NotAdmin' }
         '404': { $ref: '#/components/responses/UserNotFound' }
 
+  # Validação de prestadores: JWT do usuário → papel Administrador → controller.
+  /api/v1/admin/provider-validations:
+    get:
+      tags: [Administração]
+      operationId: listProviderValidations
+      summary: Fila de cadastros de prestador aguardando validação (#398)
+      description: |
+        Só cadastros com situação `pending`, do envio mais antigo para o mais novo (`submittedAt`, com desempate por `providerId`).
+        Por enquanto só existem Hosts (`hotel`): Pet Sitter e Pet Walker entram com a #342, e o filtro já aceita os três tipos.
+        A fila não traz documento nem link: os arquivos só saem no detalhe.
+      security:
+        - userJwt: []
+      parameters:
+        - name: providerType
+          in: query
+          description: Sem o parâmetro, lista todos os tipos
+          schema: { type: string, enum: [hotel, pet_sitter, pet_walker] }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: Página da fila; lista vazia quando não há cadastro pendente
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, pageSize, total]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ProviderValidationItem' }
+                  page: { type: integer }
+                  pageSize: { type: integer }
+                  total: { type: integer, description: Total de cadastros pendentes com o filtro aplicado }
+              example:
+                items:
+                  - providerId: 6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f
+                    providerType: hotel
+                    name: Hotel X
+                    submittedAt: '2026-11-09T12:00:00.000Z'
+                    documentCount: 3
+                    photoCount: 4
+                page: 1
+                pageSize: 20
+                total: 1
+        '400':
+          description: '`VALIDATION_ERROR`: `providerType`, `page` ou `pageSize` inválidos, parâmetro fora do contrato ou repetido. Todos os erros de uma vez'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+              example:
+                code: VALIDATION_ERROR
+                message: Parâmetros inválidos
+                details:
+                  - { field: providerType, message: 'um de: hotel, pet_sitter, pet_walker' }
+                  - { field: pageSize, message: inteiro de 1 a 50 }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotAdmin' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/admin/provider-validations/{providerId}:
+    get:
+      tags: [Administração]
+      operationId: getProviderValidation
+      summary: Detalhe de um cadastro pendente, com os documentos protegidos (#398)
+      description: |
+        Cada documento sai por um link temporário, gerado a cada requisição e válido por `expiresIn` segundos
+        (`STORAGE_SIGNED_URL_SECONDS`, padrão 300). O link não deve ser guardado. A chave do arquivo nunca sai na resposta.
+        CPF ou CNPJ sai mascarado e, do titular, nenhum dado de conta.
+        [assunção] O endereço sai sem rua e sem número (minimização). Se os critérios de análise (#396) pedirem o endereço
+        completo para conferir o comprovante, ele entra depois.
+        [assunção] O registro de quem visualizou os documentos fica para depois da #396, que fecha a regra da LGPD.
+      security:
+        - userJwt: []
+      parameters:
+        - { name: providerId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Cadastro pendente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderValidationDetail' }
+        '400':
+          description: '`VALIDATION_ERROR`: `providerId` não é UUID'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+              example:
+                code: VALIDATION_ERROR
+                message: Parâmetros inválidos
+                details:
+                  - { field: providerId, message: UUID obrigatório }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotAdmin' }
+        '404':
+          description: '`NOT_FOUND`: cadastro inexistente ou que não está `pending` (mesma resposta, para não revelar aprovado, rejeitado nem rascunho). `USER_NOT_FOUND`: usuário não encontrado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { code: NOT_FOUND, message: Cadastro não encontrado }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/StorageUnavailable' }
+
   /api/v1/me/tutor-profile:
     put:
       tags: [Usuário]
@@ -1116,6 +1224,55 @@ components:
         acceptedBreeds: { type: array, items: { type: string } }
         documents: { type: array, items: { $ref: '#/components/schemas/HostDocument' } }
         photos: { type: array, items: { $ref: '#/components/schemas/HostPhoto' } }
+
+    ProviderValidationItem:
+      type: object
+      required: [providerId, providerType, name, submittedAt, documentCount, photoCount]
+      properties:
+        providerId: { type: string, format: uuid }
+        providerType: { type: string, enum: [hotel, pet_sitter, pet_walker] }
+        name: { type: string }
+        submittedAt:
+          type: [string, 'null']
+          format: date-time
+          description: Quando o cadastro foi enviado para validação. `null` só em cadastro pendente que não passou pelo envio; esses ficam no fim da fila
+        documentCount: { type: integer }
+        photoCount: { type: integer }
+
+    ProtectedDocument:
+      type: object
+      required: [id, type, url, expiresIn]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [identity, proof_of_address, cnpj_card] }
+        url: { type: string, description: Link temporário para o arquivo. Não guardar }
+        expiresIn: { type: integer, description: Validade do link em segundos, example: 300 }
+
+    ProviderValidationDetail:
+      type: object
+      required: [providerId, providerType, name, submittedAt, cpfCnpjMasked, description, acceptedSpecies, acceptedSizes, acceptedBreeds, capacity, address, photos, documents]
+      properties:
+        providerId: { type: string, format: uuid }
+        providerType: { type: string, enum: [hotel, pet_sitter, pet_walker] }
+        name: { type: string }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        cpfCnpjMasked: { type: [string, 'null'], description: Só os 4 últimos dígitos, example: '***1234' }
+        description: { type: [string, 'null'] }
+        acceptedSpecies: { type: array, items: { type: string } }
+        acceptedSizes: { type: array, items: { type: string } }
+        acceptedBreeds: { type: array, items: { type: string } }
+        capacity: { type: [integer, 'null'] }
+        address:
+          type: [object, 'null']
+          description: Sem rua e sem número
+          required: [city, state, neighborhood, zipCode]
+          properties:
+            city: { type: string, example: São Paulo }
+            state: { type: string, example: SP }
+            neighborhood: { type: string }
+            zipCode: { type: string, example: '01234000' }
+        photos: { type: array, items: { $ref: '#/components/schemas/HostPhoto' } }
+        documents: { type: array, items: { $ref: '#/components/schemas/ProtectedDocument' } }
 
     HostDetails:
       type: object

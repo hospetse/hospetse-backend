@@ -54,6 +54,8 @@ test('seed #497/#498: criação, idempotência, HTTP, busca, agenda e rollback',
         providers: hosts.length, services: hosts.length, details: hosts.length,
         photos: hosts.reduce((sum, host) => sum + host.photos.length, 0), blocked: 3, reservations: 1,
     });
+    // #398: o pendente do seed tem data de envio, para entrar na fila de validação com posição definida
+    assert.ok((await prisma.provider.findUnique({ where: { id: hostId.pendente } })).submittedAt, 'Host pendente sem submittedAt.');
     assert.equal(second.users.length, accounts.length);
     assert.equal(second.tutors.length, 1);
     assert.equal(second.addresses.length, 1 + hosts.length);

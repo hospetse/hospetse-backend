@@ -1,4 +1,5 @@
 import { AppError } from '../lib/app-error.js';
+import { maskDocument } from '../lib/mask.js';
 import { publicFileUrl } from '../lib/storage.js';
 import { parseHostDraft } from './host-profile-policy.js';
 import { findHostProfileService, isCpfCnpjTaken, saveHostDraftService, submitHostProfileService } from './host-profile.service.js';
@@ -20,7 +21,7 @@ async function toResponse(provider) {
         providerType: provider.providerType,
         name: provider.name,
         description: provider.description,
-        cpfCnpjMasked: provider.cpfCnpj ? `***${provider.cpfCnpj.slice(-4)}` : null,
+        cpfCnpjMasked: maskDocument(provider.cpfCnpj),
         address: address && {
             zipCode: address.zipCode,
             street: address.street,

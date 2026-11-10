@@ -11,6 +11,9 @@ export const FILE_RULES = {
 const DEFAULT_SIGNED_URL_SECONDS = 300;
 const PHOTO_URL_SECONDS = 60 * 60;
 
+// Validade, em segundos, do link de documento. Quem informa o prazo na resposta (expiresIn) lê daqui, o mesmo valor do S3Storage.
+export const signedUrlSeconds = (env = process.env) => Number(env.STORAGE_SIGNED_URL_SECONDS) || DEFAULT_SIGNED_URL_SECONDS;
+
 // O tipo vem dos primeiros bytes: nome e Content-Type são informados pelo cliente e podem ser falsos.
 export function detectFileType(buffer) {
     if (buffer.subarray(0, 5).toString('latin1') === '%PDF-') return 'application/pdf';
@@ -34,7 +37,7 @@ export function fileProblem(kind, buffer) {
 export class S3Storage {
     constructor(env = process.env) {
         this.bucket = env.S3_BUCKET;
-        this.signedUrlSeconds = Number(env.STORAGE_SIGNED_URL_SECONDS) || DEFAULT_SIGNED_URL_SECONDS;
+        this.signedUrlSeconds = signedUrlSeconds(env);
         this.client = new S3Client({
             endpoint: env.S3_ENDPOINT,
             region: env.S3_REGION,

@@ -83,6 +83,8 @@ export const hosts = [
         provider: {
             id: '49800000-0000-4000-8000-000000000105', providerType: 'hotel', name: 'Hotel Pendente Demonstração',
             description: 'Aguardando validação. Não aparece na busca.', status: 'active', validationStatus: 'pending',
+            // Data fixa (#398): o cadastro entra na fila do Administrador e reexecutar o seed não muda a ordem
+            submittedAt: new Date('2026-11-02T12:00:00.000Z'),
             acceptedSpecies: [], acceptedSizes: [], acceptedBreeds: [], urlPicture: photo('Hotel Pendente'),
         },
         address: hostAddress('49800000-0000-4000-8000-000000000205', 'São Paulo', 'SP', '04538000', 'Itaim Bibi'),
