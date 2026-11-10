@@ -330,6 +330,120 @@ paths:
         '500': { $ref: '#/components/responses/InternalError' }
         '503': { $ref: '#/components/responses/StorageUnavailable' }
 
+  # Consulta de usuários: JWT do usuário → papel Administrador → controller.
+  /api/v1/admin/users:
+    get:
+      tags: [Administração]
+      operationId: listAdminUsers
+      summary: Lista os usuários da plataforma, com busca e filtros (#580)
+      description: |
+        Do cadastro mais novo para o mais antigo (`createdAt`, com desempate por `id`). Os filtros se somam.
+        O e-mail sai mascarado (LGPD), mesmo quando a busca foi feita por ele.
+      security:
+        - userJwt: []
+      parameters:
+        - name: q
+          in: query
+          description: Parte do nome ou do e-mail, sem diferenciar maiúsculas de minúsculas. Espaços nas pontas são ignorados
+          schema: { type: string, minLength: 2, maxLength: 100 }
+        - name: role
+          in: query
+          description: '`tutor`: tem perfil de Tutor. `provider`: tem cadastro de prestador, em qualquer situação. `admin`: conta com o papel Administrador'
+          schema: { type: string, enum: [tutor, provider, admin] }
+        - name: status
+          in: query
+          description: 'Estado da conta. [assunção] valores de hoje; a #413 revê os estados da conta.'
+          schema: { type: string, enum: [active, blocked, suspended, pending] }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: Página de usuários; lista vazia quando nenhum combina com os filtros
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, pageSize, total]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AdminUserItem' }
+                  page: { type: integer }
+                  pageSize: { type: integer }
+                  total: { type: integer, description: Total de usuários com os filtros aplicados }
+              example:
+                items:
+                  - id: 6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f
+                    name: Lucas
+                    emailMasked: l***@outlook.com.br
+                    accountType: user
+                    roles: [tutor]
+                    status: active
+                    createdAt: '2026-11-09T12:00:00.000Z'
+                page: 1
+                pageSize: 20
+                total: 1
+        '400':
+          description: '`VALIDATION_ERROR`: `q`, `role`, `status`, `page` ou `pageSize` inválidos, parâmetro fora do contrato ou repetido. Todos os erros de uma vez'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+              example:
+                code: VALIDATION_ERROR
+                message: Parâmetros inválidos
+                details:
+                  - { field: q, message: texto de 2 a 100 caracteres }
+                  - { field: role, message: 'um de: tutor, provider, admin' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotAdmin' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/admin/users/{id}:
+    get:
+      tags: [Administração]
+      operationId: getAdminUser
+      summary: Detalhe de um usuário, com papéis, contratações e penalidades (#580)
+      description: |
+        E-mail, CPF, CNPJ e telefone saem mascarados (LGPD). Endereço, data de nascimento e contato de emergência não saem.
+        `contracts` traz as 20 solicitações mais recentes do usuário, como Tutor e como prestador.
+        [assunção] Sem paginação no detalhe: as contratações param em 20 e as penalidades saem todas.
+        [assunção] As ocorrências (`occurrences`) ficam fora da resposta até a #413 modelar os estados da conta,
+        as ocorrências e as penalidades. Até lá, valem os estados e as penalidades de hoje.
+      security:
+        - userJwt: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Usuário encontrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUserDetail' }
+        '400':
+          description: '`VALIDATION_ERROR`: `id` não é UUID'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+              example:
+                code: VALIDATION_ERROR
+                message: Parâmetros inválidos
+                details:
+                  - { field: id, message: UUID obrigatório }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotAdmin' }
+        '404':
+          description: '`NOT_FOUND`: não existe usuário com esse `id`. `USER_NOT_FOUND`: o usuário do token não foi encontrado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { code: NOT_FOUND, message: Usuário não encontrado }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /api/v1/me/tutor-profile:
     put:
       tags: [Usuário]
@@ -1273,6 +1387,73 @@ components:
             zipCode: { type: string, example: '01234000' }
         photos: { type: array, items: { $ref: '#/components/schemas/HostPhoto' } }
         documents: { type: array, items: { $ref: '#/components/schemas/ProtectedDocument' } }
+
+    AdminUserItem:
+      type: object
+      required: [id, name, emailMasked, accountType, roles, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        emailMasked: { type: string, description: Só a primeira letra e o domínio, example: l***@outlook.com.br }
+        accountType: { type: string, enum: [user, admin] }
+        roles:
+          type: array
+          description: Vazia quando o usuário ainda não tem perfil nem papel
+          items: { type: string, enum: [tutor, provider, admin] }
+        status: { type: string, enum: [active, blocked, suspended, pending], description: '[assunção] valores de hoje; a #413 revê os estados da conta.' }
+        createdAt: { type: string, format: date-time }
+
+    AdminUserDetail:
+      type: object
+      required: [id, name, emailMasked, accountType, status, profileStatus, roles, createdAt, tutor, provider, contracts, penalties]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        emailMasked: { type: string, example: l***@outlook.com.br }
+        accountType: { type: string, enum: [user, admin] }
+        status: { type: string, enum: [active, blocked, suspended, pending], description: '[assunção] valores de hoje; a #413 revê os estados da conta.' }
+        profileStatus: { type: string, enum: [incomplete, complete] }
+        roles: { type: array, items: { type: string, enum: [tutor, provider, admin] } }
+        createdAt: { type: string, format: date-time }
+        tutor:
+          type: [object, 'null']
+          description: '`null` quando o usuário não é Tutor'
+          required: [cpfMasked, phoneMasked]
+          properties:
+            cpfMasked: { type: [string, 'null'], description: Só os 4 últimos dígitos, example: '***1234' }
+            phoneMasked: { type: [string, 'null'], description: Só os 4 últimos dígitos, example: '***4321' }
+        provider:
+          type: [object, 'null']
+          description: '`null` quando o usuário não tem cadastro de prestador'
+          required: [id, providerType, validationStatus, cpfCnpjMasked]
+          properties:
+            id: { type: string, format: uuid }
+            providerType: { type: string, enum: [hotel, pet_sitter, pet_walker] }
+            validationStatus: { type: string, enum: [draft, pending, approved, rejected] }
+            cpfCnpjMasked: { type: [string, 'null'], description: Só os 4 últimos dígitos, example: '***0001' }
+        contracts:
+          type: array
+          description: As 20 solicitações mais recentes, da mais nova para a mais antiga
+          items:
+            type: object
+            required: [id, as, status, startDate, totalValue]
+            properties:
+              id: { type: string, format: uuid }
+              as: { type: string, enum: [tutor, provider], description: Lado do usuário na contratação }
+              status: { type: string, enum: [requested, awaiting_payment, accepted, rejected, checked_in, checked_out, cancelled, completed] }
+              startDate: { type: string, format: date, example: '2026-11-20' }
+              totalValue: { type: number, example: 240 }
+        penalties:
+          type: array
+          description: Da mais nova para a mais antiga
+          items:
+            type: object
+            required: [id, type, reason, createdAt]
+            properties:
+              id: { type: string, format: uuid }
+              type: { type: string, enum: [warning, fine, suspension, ban], description: '[assunção] `fine` pode aparecer e hoje sai sem valor; a #413 revê o modelo de penalidades.' }
+              reason: { type: string }
+              createdAt: { type: string, format: date-time }
 
     HostDetails:
       type: object
