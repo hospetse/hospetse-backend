@@ -157,6 +157,18 @@ test('AC-01: cadastro completo pelas rotas fica pendente, com endereço, capacid
     assert.strictEqual(saved.urlPicture, saved.photos[0].url);
 });
 
+test('submissão do Host grava submittedAt', async () => {
+    const { headers, id } = await newDraft();
+    assert.strictEqual((await prisma.provider.findUnique({ where: { id } })).submittedAt, null);
+
+    const before = Date.now();
+    await api('POST', '/api/v1/me/host/submit', headers);
+
+    // a data de envio é a do servidor, e a fila do Administrador ordena por ela (#398)
+    const { submittedAt } = await prisma.provider.findUnique({ where: { id } });
+    assert.ok(submittedAt.getTime() >= before && submittedAt.getTime() <= Date.now());
+});
+
 test('AC-02: rascunho fica indisponível na busca, nos detalhes e para solicitação', async () => {
     await assertUnavailable(await newDraft(), await newTutor());
 });

@@ -79,7 +79,7 @@ export async function submitHostProfileService(user) {
     // Filtrar por draft impede que dois envios simultâneos passem
     const { count } = await prisma.provider.updateMany({
         where: { id: provider.id, validationStatus: 'draft' },
-        data: { validationStatus: 'pending', urlPicture },
+        data: { validationStatus: 'pending', urlPicture, submittedAt: new Date() },
     });
     if (count === 0) throw alreadySubmitted();
 

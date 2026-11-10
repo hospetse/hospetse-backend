@@ -84,6 +84,8 @@ model Provider {
   // draft (rascunho, #325), pending, approved ou rejected (#323): só approved aparece nas consultas públicas
   validationStatus String                 @default("pending") @map("validation_status") @db.VarChar(20)
   description      String?                @db.VarChar(2000)
+  // Quando o cadastro foi enviado para validação (#398): ordena a fila do Administrador. updatedAt não serve, muda a cada edição
+  submittedAt      DateTime?              @map("submitted_at") @db.Timestamptz(3)
   // Restrições aceitas, com os mesmos valores de pets.pet_species/pet_size/pet_breed. Raças vazias = aceita todas
   acceptedSpecies  String[]               @default([]) @map("accepted_species") @db.VarChar(100)
   acceptedSizes    String[]               @default([]) @map("accepted_sizes") @db.VarChar(30)
@@ -108,6 +110,7 @@ model Provider {
   updatedAt        DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([providerType])
+  @@index([validationStatus, submittedAt])
   @@map("providers")
 }
 
