@@ -4,7 +4,7 @@ API do back-end do Hospetse (plataforma de hospedagem e cuidado de pets), constr
 
 As decisões de arquitetura do projeto (por que Express, ES Modules, estratégia de testes, etc.) estão documentadas na [wiki do projeto](https://dev.azure.com/escola-ti/Hospetse/_wiki/wikis/Hospetse.wiki/55/Arquitetura) (ADR-001 a ADR-010).
 
-## Seed de demonstração (#497)
+## Seed de demonstração (#497, #314)
 
 Execução manual, fora do deploy. Com dependências instaladas e `DATABASE_URL` do back-end configurada no `.env`, aplique as migrations com `npx prisma migrate deploy` e execute:
 
@@ -39,7 +39,7 @@ Reexecutar preserva IDs e a data de conclusão do perfil, restaura os dados de d
 
 `[assunção]` (#497) A rota de serviço do Auth citada no card ainda não existe. Usamos dois seeds locais, cada um acessando somente seu banco. A transação é por banco; não há atomicidade entre serviços. Se a segunda execução falhar, corrija o problema e repita. Não rode como parte do Dockerfile ou pipeline.
 
-Após os dois seeds, faça login no Auth (`POST /api/v1/auth/login`) e use o access token no back-end em `GET /api/v1/me`. O Tutor completo retorna `canContract: true` e três pets em `GET /api/v1/me/pets`; o incompleto retorna `canContract: false`. O papel de Administrador é persistido no banco; `/me` ainda não o expõe.
+Após os dois seeds, faça login no Auth (`POST /api/v1/auth/login`) e use o access token no back-end em `GET /api/v1/me`. O Tutor completo retorna `canContract: true` e três pets em `GET /api/v1/me/pets`; o incompleto retorna `canContract: false`. O papel de Administrador é persistido no banco; confirme com `GET /api/v1/admin/me` (`{ id, accountType }`). A recuperação da senha do Administrador é feita no seed do Auth (`SEED_ADMIN_PASSWORD`, #314 / DA-07), não por rota pública.
 
 ### Teste isolado do seed
 
