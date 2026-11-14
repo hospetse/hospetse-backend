@@ -3,6 +3,7 @@ import { PET_SIZES, PET_SPECIES, requireTutor } from './pet-policy.js';
 import { createPetService, deletePetService, listPetsService, updatePetService } from './pet.service.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+// O id vai para uma coluna UUID: texto em outro formato faria o Prisma lançar erro (500), então já responde 404
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_PAGE_SIZE = 50;
 
@@ -12,6 +13,7 @@ const isOptional = (value) => value === undefined || value === null || value ===
 const isRealDate = (value) => typeof value === 'string' && DATE.test(value)
     && !isNaN(new Date(value)) && new Date(value).toISOString().slice(0, 10) === value;
 
+// Erros de negócio viram { code, message, details? }; o resto vira 500 com só a mensagem no log.
 function sendError(res, error) {
     if (error instanceof AppError) {
         return res.status(error.statusCode).json({ code: error.code, message: error.message, details: error.details });
@@ -20,8 +22,11 @@ function sendError(res, error) {
     return res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Erro inesperado' });
 }
 
+// Body do POST e do PUT: o PUT substitui o pet inteiro, então opcional omitido volta a ser null.
+// O Tutor vem só do JWT (req.user): um tutorId no body é recusado como campo fora do contrato.
 function parsePetBody(body) {
     const { name, species, breed, size, birthDate, medicalNotes, behavioralNotes, ...extra } = body ?? {};
+    // Lista todos os campos inválidos de uma vez
     const details = [];
     const invalid = (field, message) => details.push({ field, message });
 
@@ -52,6 +57,7 @@ function parsePetBody(body) {
     };
 }
 
+// Nomes do contrato da API (sem o prefixo pet) e a data só com o dia.
 function toResponse(pet) {
     return {
         id: pet.id,
@@ -65,6 +71,7 @@ function toResponse(pet) {
     };
 }
 
+// POST /api/v1/me/pets (TSK-04 #369): valida o payload, chama o service e traduz o resultado em status.
 export async function createPetController(req, res) {
     try {
         const tutor = requireTutor(req.user);
@@ -76,6 +83,7 @@ export async function createPetController(req, res) {
     }
 }
 
+// GET /api/v1/me/pets?page=1&pageSize=20 (TSK-04 #369): só os pets ativos do próprio Tutor.
 export async function listPetsController(req, res) {
     try {
         const tutor = requireTutor(req.user);
@@ -94,6 +102,8 @@ export async function listPetsController(req, res) {
     }
 }
 
+// PUT /api/v1/me/pets/:id (#371): substitui os dados de um pet ativo do próprio Tutor.
+// Mesmo 404 para id inválido, inexistente, de outro Tutor ou inativo, para não revelar que o pet existe.
 export async function updatePetController(req, res) {
     try {
         const tutor = requireTutor(req.user);
@@ -108,6 +118,7 @@ export async function updatePetController(req, res) {
     }
 }
 
+// DELETE /api/v1/me/pets/:id (#371): desativa o pet (exclusão lógica). Já desativado responde o mesmo 404.
 export async function deletePetController(req, res) {
     try {
         const tutor = requireTutor(req.user);
