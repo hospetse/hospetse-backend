@@ -9,6 +9,7 @@ info:
     **Autenticação (#298):** tudo sob `/api/v1` é protegido por padrão, antes de chegar na rota.
     `/api/v1/internal/*` exige o token de serviço do Auth; o resto exige o JWT do usuário.
     Sem autenticação válida, qualquer caminho sob `/api/v1` responde `401`, inclusive os que não existem.
+    Sob `/api/v1/admin` (#313), usuário autenticado sem o papel Administrador responde `403`, inclusive nos caminhos que não existem.
 
     **Inventário das rotas públicas** (as únicas com `security: []`): `GET /health`, `GET /health/ready`,
     `GET /docs` (esta documentação) e `GET /docs/openapi.yaml` (este arquivo).
@@ -34,6 +35,8 @@ tags:
     description: Rotas do app, autenticadas pelo JWT do usuário
   - name: Host
     description: Consulta de Hosts pelo Tutor e rotas do próprio Host
+  - name: Administração
+    description: Exigem o papel Administrador (#313)
   - name: Contratação
     description: Exigem conta ativa e perfil complete (#263). service-requests e checkout seguem provisórias até as tasks de reserva e checkout
 
@@ -196,6 +199,136 @@ paths:
                         description: '`true` só com perfil complete e conta que não esteja blocked ou suspended'
         '401': { $ref: '#/components/responses/TokenInvalid' }
         '404': { $ref: '#/components/responses/UserNotFound' }
+
+  /api/v1/admin/me:
+    get:
+      tags: [Administração]
+      operationId: getAdminMe
+      summary: Confirma o papel Administrador do usuário autenticado (#313)
+      security:
+        - userJwt: []
+      responses:
+        '200':
+          description: Usuário com o papel Administrador
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, accountType]
+                properties:
+                  id: { type: string, format: uuid }
+                  accountType: { type: string, enum: [admin] }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotAdmin' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+
+  # Validação de prestadores: JWT do usuário → papel Administrador → controller.
+  /api/v1/admin/provider-validations:
+    get:
+      tags: [Administração]
+      operationId: listProviderValidations
+      summary: Fila de cadastros de prestador aguardando validação (#398)
+      description: |
+        Só cadastros com situação `pending`, do envio mais antigo para o mais novo (`submittedAt`, com desempate por `providerId`).
+        Por enquanto só existem Hosts (`hotel`): Pet Sitter e Pet Walker entram com a #342, e o filtro já aceita os três tipos.
+        A fila não traz documento nem link: os arquivos só saem no detalhe.
+      security:
+        - userJwt: []
+      parameters:
+        - name: providerType
+          in: query
+          description: Sem o parâmetro, lista todos os tipos
+          schema: { type: string, enum: [hotel, pet_sitter, pet_walker] }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: Página da fila; lista vazia quando não há cadastro pendente
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, pageSize, total]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ProviderValidationItem' }
+                  page: { type: integer }
+                  pageSize: { type: integer }
+                  total: { type: integer, description: Total de cadastros pendentes com o filtro aplicado }
+              example:
+                items:
+                  - providerId: 6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f
+                    providerType: hotel
+                    name: Hotel X
+                    submittedAt: '2026-11-09T12:00:00.000Z'
+                    documentCount: 3
+                    photoCount: 4
+                page: 1
+                pageSize: 20
+                total: 1
+        '400':
+          description: '`VALIDATION_ERROR`: `providerType`, `page` ou `pageSize` inválidos, parâmetro fora do contrato ou repetido. Todos os erros de uma vez'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+              example:
+                code: VALIDATION_ERROR
+                message: Parâmetros inválidos
+                details:
+                  - { field: providerType, message: 'um de: hotel, pet_sitter, pet_walker' }
+                  - { field: pageSize, message: inteiro de 1 a 50 }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotAdmin' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/admin/provider-validations/{providerId}:
+    get:
+      tags: [Administração]
+      operationId: getProviderValidation
+      summary: Detalhe de um cadastro pendente, com os documentos protegidos (#398)
+      description: |
+        Cada documento sai por um link temporário, gerado a cada requisição e válido por `expiresIn` segundos
+        (`STORAGE_SIGNED_URL_SECONDS`, padrão 300). O link não deve ser guardado. A chave do arquivo nunca sai na resposta.
+        CPF ou CNPJ sai mascarado e, do titular, nenhum dado de conta.
+        [assunção] O endereço sai sem rua e sem número (minimização). Se os critérios de análise (#396) pedirem o endereço
+        completo para conferir o comprovante, ele entra depois.
+        [assunção] O registro de quem visualizou os documentos fica para depois da #396, que fecha a regra da LGPD.
+      security:
+        - userJwt: []
+      parameters:
+        - { name: providerId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Cadastro pendente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderValidationDetail' }
+        '400':
+          description: '`VALIDATION_ERROR`: `providerId` não é UUID'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+              example:
+                code: VALIDATION_ERROR
+                message: Parâmetros inválidos
+                details:
+                  - { field: providerId, message: UUID obrigatório }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotAdmin' }
+        '404':
+          description: '`NOT_FOUND`: cadastro inexistente ou que não está `pending` (mesma resposta, para não revelar aprovado, rejeitado nem rascunho). `USER_NOT_FOUND`: usuário não encontrado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { code: NOT_FOUND, message: Cadastro não encontrado }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/StorageUnavailable' }
 
   /api/v1/me/tutor-profile:
     put:
@@ -553,6 +686,182 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  # Cadastro do Host (#325): JWT do usuário → (JSON no PUT) → controller. O dono vem só do JWT.
+  /api/v1/me/host:
+    put:
+      tags: [Host]
+      operationId: saveHostDraft
+      summary: Salva o rascunho do cadastro do Host (#325)
+      description: |
+        A primeira chamada cria o rascunho (`draft`) e as seguintes atualizam. `providerType` e `name` são sempre exigidos;
+        os outros campos, quando omitidos, ficam como estão. Rascunho não aparece nas consultas públicas nem dá acesso às rotas de Host.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HostDraftInput' }
+      responses:
+        '200':
+          description: Rascunho salvo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostProfile' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '409':
+          description: '`HOST_ALREADY_SUBMITTED`: o cadastro já foi enviado e não edita mais. `HOST_DRAFT_CONFLICT`: dois primeiros envios ao mesmo tempo'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    get:
+      tags: [Host]
+      operationId: getHostProfile
+      summary: Cadastro do Host do próprio usuário (#325)
+      description: Para o app retomar o rascunho e mostrar a situação da validação. CPF ou CNPJ volta mascarado; a chave dos documentos nunca sai.
+      responses:
+        '200':
+          description: Cadastro do usuário
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostProfile' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404':
+          description: '`NOT_FOUND`: o usuário ainda não tem cadastro de Host. `USER_NOT_FOUND`: usuário não encontrado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/me/host/submit:
+    post:
+      tags: [Host]
+      operationId: submitHostProfile
+      summary: Envia o rascunho para validação (#325)
+      description: |
+        Exige descrição, CPF ou CNPJ, endereço, capacidade, ao menos uma espécie e um porte, ao menos uma foto e os documentos `identity` e
+        `proof_of_address`, além de `cnpj_card` quando for CNPJ. O perfil fica `pending`, fora das consultas públicas até a aprovação,
+        e a primeira foto vira a principal. Sem body.
+      responses:
+        '200':
+          description: Cadastro enviado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostProfile' }
+        '400':
+          description: Tudo o que falta no cadastro; o rascunho não muda
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404':
+          description: '`NOT_FOUND`: o usuário ainda não tem cadastro de Host. `USER_NOT_FOUND`: usuário não encontrado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`HOST_ALREADY_SUBMITTED`: o cadastro já foi enviado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/me/host/documents:
+    post:
+      tags: [Host]
+      operationId: addHostDocument
+      summary: Envia um documento do cadastro do Host (#325)
+      description: |
+        Um arquivo por requisição, em rascunho do próprio usuário. O tipo é conferido pelo conteúdo do arquivo: nome e `Content-Type`
+        enviados pelo cliente são ignorados. PDF, JPEG ou PNG, até 10 MB e até 5 arquivos por tipo de documento.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [type, file]
+              properties:
+                type: { type: string, enum: [identity, proof_of_address, cnpj_card] }
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: Documento guardado. A chave no armazenamento nunca sai
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostDocument' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404':
+          description: '`NOT_FOUND`: o usuário ainda não tem cadastro de Host. `USER_NOT_FOUND`: usuário não encontrado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409': { $ref: '#/components/responses/HostFileConflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/StorageUnavailable' }
+
+  /api/v1/me/host/documents/{id}:
+    get:
+      tags: [Host]
+      operationId: getHostDocumentLink
+      summary: Link temporário de um documento, só para o titular (#325)
+      description: O link vale 5 minutos por padrão (`STORAGE_SIGNED_URL_SECONDS`) e não deve ser guardado. O acesso do Administrador entra com o fluxo de validação.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Link temporário
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url: { type: string }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404':
+          description: '`NOT_FOUND`: documento inexistente ou de outro usuário (mesma resposta, para não revelar que existe). `USER_NOT_FOUND`: usuário não encontrado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/me/host/photos:
+    post:
+      tags: [Host]
+      operationId: addHostPhoto
+      summary: Envia uma foto do cadastro do Host (#325)
+      description: |
+        Um arquivo por requisição, em rascunho do próprio usuário. O tipo é conferido pelo conteúdo do arquivo.
+        JPEG, PNG ou WebP, até 5 MB e até 10 fotos. A primeira vira a foto principal na submissão.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: Foto guardada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostPhoto' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404':
+          description: '`NOT_FOUND`: o usuário ainda não tem cadastro de Host. `USER_NOT_FOUND`: usuário não encontrado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409': { $ref: '#/components/responses/HostFileConflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/StorageUnavailable' }
+
   # Agenda do Host (#482): JWT do usuário → (JSON no POST) → controller (exige ser Host). O Host vem só do JWT.
   /api/v1/me/host/agenda:
     get:
@@ -882,7 +1191,7 @@ components:
         name: { type: string, example: Hotelzinho do Rex }
         serviceName: { type: string, example: Diária }
         dailyPrice: { type: number, example: 95 }
-        pictureUrl: { type: [string, 'null'] }
+        pictureUrl: { type: [string, 'null'], description: 'Foto de perfil. Pode ser um link temporário: não guardar para usar depois' }
         location:
           type: object
           description: Só cidade e bairro; nunca rua, número ou CEP
@@ -895,6 +1204,122 @@ components:
             rating: { type: [number, 'null'], example: 4.5 }
             reviewCount: { type: integer, example: 12 }
 
+    HostAddress:
+      type: object
+      additionalProperties: false
+      required: [zipCode, street, number, neighborhood, city, state]
+      properties:
+        zipCode:
+          type: string
+          pattern: '^\d{5}-?\d{3}$'
+          description: Com ou sem hífen; gravado sem
+          example: 01001-000
+        street: { type: string, minLength: 1, maxLength: 255 }
+        number: { type: string, minLength: 1, maxLength: 20 }
+        complement: { type: [string, 'null'], maxLength: 100 }
+        neighborhood: { type: string, minLength: 1, maxLength: 100 }
+        city: { type: string, minLength: 1, maxLength: 100 }
+        state: { type: string, pattern: '^[A-Za-z]{2}$', example: SP }
+
+    HostDraftInput:
+      type: object
+      additionalProperties: false
+      required: [providerType, name]
+      properties:
+        providerType: { type: string, enum: [hotel] }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        cpfCnpj: { type: [string, 'null'], description: CPF ou CNPJ válido e ainda não usado por outro prestador; com ou sem pontuação }
+        address: { $ref: '#/components/schemas/HostAddress' }
+        capacity: { type: integer, minimum: 1, maximum: 1000, description: Quantos pets o hotel recebe ao mesmo tempo. Usada na agenda e na busca }
+        acceptedSpecies: { type: array, items: { type: string, enum: [dog, cat] } }
+        acceptedSizes: { type: array, items: { type: string, enum: [small, medium, large] } }
+        acceptedBreeds: { type: array, description: Vazia = aceita todas as raças, items: { type: string, minLength: 1, maxLength: 100 } }
+
+    HostDocument:
+      type: object
+      required: [id, type]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [identity, proof_of_address, cnpj_card] }
+
+    HostPhoto:
+      type: object
+      required: [id, url]
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string, description: 'Pode ser um link temporário: não guardar para usar depois' }
+
+    HostProfile:
+      type: object
+      required: [id, validationStatus, providerType, name, description, cpfCnpjMasked, address, capacity, acceptedSpecies, acceptedSizes, acceptedBreeds, documents, photos]
+      properties:
+        id: { type: string, format: uuid }
+        validationStatus: { type: string, enum: [draft, pending, approved, rejected] }
+        providerType: { type: string, enum: [hotel] }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        cpfCnpjMasked: { type: [string, 'null'], description: Só os 4 últimos dígitos, example: '***4725' }
+        address:
+          oneOf:
+            - { $ref: '#/components/schemas/HostAddress' }
+            - { type: 'null' }
+        capacity: { type: [integer, 'null'] }
+        acceptedSpecies: { type: array, items: { type: string } }
+        acceptedSizes: { type: array, items: { type: string } }
+        acceptedBreeds: { type: array, items: { type: string } }
+        documents: { type: array, items: { $ref: '#/components/schemas/HostDocument' } }
+        photos: { type: array, items: { $ref: '#/components/schemas/HostPhoto' } }
+
+    ProviderValidationItem:
+      type: object
+      required: [providerId, providerType, name, submittedAt, documentCount, photoCount]
+      properties:
+        providerId: { type: string, format: uuid }
+        providerType: { type: string, enum: [hotel, pet_sitter, pet_walker] }
+        name: { type: string }
+        submittedAt:
+          type: [string, 'null']
+          format: date-time
+          description: Quando o cadastro foi enviado para validação. `null` só em cadastro pendente que não passou pelo envio; esses ficam no fim da fila
+        documentCount: { type: integer }
+        photoCount: { type: integer }
+
+    ProtectedDocument:
+      type: object
+      required: [id, type, url, expiresIn]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [identity, proof_of_address, cnpj_card] }
+        url: { type: string, description: Link temporário para o arquivo. Não guardar }
+        expiresIn: { type: integer, description: Validade do link em segundos, example: 300 }
+
+    ProviderValidationDetail:
+      type: object
+      required: [providerId, providerType, name, submittedAt, cpfCnpjMasked, description, acceptedSpecies, acceptedSizes, acceptedBreeds, capacity, address, photos, documents]
+      properties:
+        providerId: { type: string, format: uuid }
+        providerType: { type: string, enum: [hotel, pet_sitter, pet_walker] }
+        name: { type: string }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        cpfCnpjMasked: { type: [string, 'null'], description: Só os 4 últimos dígitos, example: '***1234' }
+        description: { type: [string, 'null'] }
+        acceptedSpecies: { type: array, items: { type: string } }
+        acceptedSizes: { type: array, items: { type: string } }
+        acceptedBreeds: { type: array, items: { type: string } }
+        capacity: { type: [integer, 'null'] }
+        address:
+          type: [object, 'null']
+          description: Sem rua e sem número
+          required: [city, state, neighborhood, zipCode]
+          properties:
+            city: { type: string, example: São Paulo }
+            state: { type: string, example: SP }
+            neighborhood: { type: string }
+            zipCode: { type: string, example: '01234000' }
+        photos: { type: array, items: { $ref: '#/components/schemas/HostPhoto' } }
+        documents: { type: array, items: { $ref: '#/components/schemas/ProtectedDocument' } }
+
     HostDetails:
       type: object
       required: [id, name, description, pictureUrl, location, photos, accepts, services, reputation]
@@ -902,7 +1327,7 @@ components:
         id: { type: string, format: uuid }
         name: { type: string, description: Nome de exibição }
         description: { type: [string, 'null'], maxLength: 2000 }
-        pictureUrl: { type: [string, 'null'], description: Foto de perfil }
+        pictureUrl: { type: [string, 'null'], description: 'Foto de perfil. Pode ser um link temporário: não guardar para usar depois' }
         location:
           type: object
           description: Só cidade e bairro; nunca rua, número ou CEP
@@ -911,7 +1336,7 @@ components:
             neighborhood: { type: [string, 'null'] }
         photos:
           type: array
-          description: URLs das fotos, da mais antiga para a mais nova
+          description: 'URLs das fotos, da mais antiga para a mais nova. Podem ser links temporários: não guardar para usar depois'
           items: { type: string }
         accepts:
           type: object
@@ -1087,6 +1512,22 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
           example: { code: HOST_REQUIRED, message: Apenas Hosts acessam as solicitações recebidas. }
+    NotAdmin:
+      description: '`ADMIN_REQUIRED`: o usuário não tem o papel Administrador'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { code: ADMIN_REQUIRED, message: Apenas Administradores acessam esta rota. }
+    HostFileConflict:
+      description: '`HOST_ALREADY_SUBMITTED`: o cadastro já foi enviado e não aceita arquivos. `FILE_LIMIT_REACHED`: limite de arquivos atingido'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    StorageUnavailable:
+      description: '`STORAGE_UNAVAILABLE`: o armazenamento de arquivos falhou. Pode tentar de novo'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     ReservationNotFound:
       description: '`NOT_FOUND`: solicitação inexistente ou de outro Host (mesma resposta, para não revelar que existe)'
       content:

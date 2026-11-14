@@ -5,12 +5,17 @@ import { prisma } from './lib/prisma.js';
 import { requireServiceToken } from './middlewares/service-token.js';
 import { provisionUserController } from './users/internal-users.controller.js';
 import { requireUser } from './middlewares/user-token.js';
-import { meController } from './users/me.controller.js';
+import { adminMeController, meController } from './users/me.controller.js';
+import { getProviderValidationController, listProviderValidationsController } from './admin/provider-validations.controller.js';
 import { tutorProfileController } from './tutors/tutor-profile.controller.js';
 import { hostDetailsController } from './hosts/host-details.controller.js';
+import { getHostProfileController, saveHostDraftController, submitHostProfileController } from './hosts/host-profile.controller.js';
+import { addHostDocumentController, addHostPhotoController, hostDocumentLinkController } from './hosts/host-files.controller.js';
+import { uploadFile } from './middlewares/upload-file.js';
 import { searchHostsController } from './hosts/host-search.controller.js';
 import { blockPeriodController, getAgendaController, unblockDayController } from './hosts/agenda.controller.js';
 import { requireCanContract } from './middlewares/can-contract.js';
+import { requireAdmin } from './middlewares/admin-only.js';
 import { startContractController } from './contracts/contracts.controller.js';
 import { createPetController, deletePetController, listPetsController, updatePetController } from './pets/pet.controller.js';
 import { createReservationController } from './reservations/create-reservation.controller.js';
@@ -70,6 +75,16 @@ app.use('/api/v1', (req, res, next) =>
 const CONTRACT_PATHS = ['/api/v1/reservations', '/api/v1/service-requests', '/api/v1/checkout'];
 app.use(CONTRACT_PATHS, (req, res, next) => (req.method === 'POST' ? requireCanContract(req, res, next) : next()));
 
+// Área administrativa protegida por padrão (HSP-PBI-007-TSK-04 #313): sem o papel, 403 em qualquer caminho sob /admin.
+app.use('/api/v1/admin', requireAdmin);
+
+// Confirma o papel para a Web depois do login (#313). Ordem: JWT do usuário → papel Administrador → controller.
+app.get('/api/v1/admin/me', adminMeController);
+
+// Fila e detalhe da validação de prestadores (#398). Ordem: JWT do usuário → papel Administrador → controller.
+app.get('/api/v1/admin/provider-validations', listProviderValidationsController);
+app.get('/api/v1/admin/provider-validations/:providerId', getProviderValidationController);
+
 // Provisionamento do USER pelo Auth Server (TSK-01 #259). Ordem: token de serviço → leitura do JSON → controller.
 app.put('/api/v1/internal/users/:authUserId', express.json(), provisionUserController);
 
@@ -99,6 +114,16 @@ app.get('/api/v1/me/host/reservations', listHostReservationsController);
 // Decisão do Host sobre a solicitação (HSP-PBI-042-TSK-01 #491). Ordem: JWT do usuário → (JSON, na recusa) → controller (exige ser Host).
 app.post('/api/v1/me/host/reservations/:id/accept', acceptHostReservationController);
 app.post('/api/v1/me/host/reservations/:id/reject', express.json(), rejectHostReservationController);
+
+// Cadastro do Host (HSP-PBI-008-TSK-05 #325). Ordem: JWT do usuário → (JSON no PUT) → controller. O dono vem só do JWT.
+app.put('/api/v1/me/host', express.json(), saveHostDraftController);
+app.get('/api/v1/me/host', getHostProfileController);
+app.post('/api/v1/me/host/submit', submitHostProfileController);
+
+// Arquivos do cadastro do Host (#325). Ordem: JWT do usuário → leitura do arquivo (no POST) → controller. O dono vem só do JWT.
+app.post('/api/v1/me/host/documents', uploadFile('document'), addHostDocumentController);
+app.post('/api/v1/me/host/photos', uploadFile('photo'), addHostPhotoController);
+app.get('/api/v1/me/host/documents/:id', hostDocumentLinkController);
 
 // Agenda do Host (HSP-PBI-036-TSK-01 #482). Ordem: JWT do usuário → (JSON no POST) → controller (exige ser Host).
 app.get('/api/v1/me/host/agenda', getAgendaController);

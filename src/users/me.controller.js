@@ -9,3 +9,8 @@ export function meController(req, res) {
         permissions: { canSearch: true, canContract: canContract(user) },
     });
 }
+
+// GET /api/v1/admin/me (#313). Só chega aqui quem passou pelo requireAdmin.
+export function adminMeController(req, res) {
+    res.status(200).json({ id: req.user.id, accountType: req.user.accountType });
+}

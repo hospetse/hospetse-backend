@@ -1,3 +1,4 @@
+import { publicFileUrl } from '../lib/storage.js';
 import { findPublicHostService } from './host-details.service.js';
 
 // O id vai para uma coluna UUID: texto em outro formato faria o Prisma lançar erro (500), então já responde 404
@@ -17,9 +18,9 @@ export async function hostDetailsController(req, res) {
         id: host.id,
         name: host.name,
         description: host.description,
-        pictureUrl: host.urlPicture,
+        pictureUrl: await publicFileUrl(host.urlPicture),
         location: { city: host.address?.city ?? null, neighborhood: host.address?.neighborhood ?? null },
-        photos: host.photos.map((photo) => photo.url),
+        photos: await Promise.all(host.photos.map((photo) => publicFileUrl(photo.url))),
         accepts: { species: host.acceptedSpecies, sizes: host.acceptedSizes, breeds: host.acceptedBreeds },
         services: host.services.map((service) => ({ id: service.id, name: service.name, price: Number(service.price) })),
         reputation: { rating: host.rating == null ? null : Number(host.rating), reviewCount: host._count.reviews },
