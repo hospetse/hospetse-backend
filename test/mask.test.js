@@ -11,7 +11,12 @@ test('CPF, CNPJ e telefone: só os 4 últimos dígitos', () => {
 
 test('e-mail: a primeira letra e o domínio', () => {
     assert.strictEqual(maskEmail('lucas@outlook.com.br'), 'l***@outlook.com.br');
-    assert.strictEqual(maskEmail('a@b.dev'), 'a***@b.dev');
+    assert.strictEqual(maskEmail('ana@b.dev'), 'a***@b.dev');
+});
+
+test('e-mail curto (menos de 3 antes do @): só o domínio, sem a primeira letra', () => {
+    assert.strictEqual(maskEmail('a@b.dev'), '***@b.dev');
+    assert.strictEqual(maskEmail('ab@b.dev'), '***@b.dev');
 });
 
 test('sem valor: null, sem máscara vazia', () => {
