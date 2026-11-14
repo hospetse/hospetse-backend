@@ -4,7 +4,7 @@ API do back-end do Hospetse (plataforma de hospedagem e cuidado de pets), constr
 
 As decisões de arquitetura do projeto (por que Express, ES Modules, estratégia de testes, etc.) estão documentadas na [wiki do projeto](https://dev.azure.com/escola-ti/Hospetse/_wiki/wikis/Hospetse.wiki/55/Arquitetura) (ADR-001 a ADR-010).
 
-## Seed de demonstração (#497)
+## Seed de demonstração (#497, #314)
 
 Execução manual, fora do deploy. Com dependências instaladas e `DATABASE_URL` do back-end configurada no `.env`, aplique as migrations com `npx prisma migrate deploy` e execute:
 
@@ -39,7 +39,7 @@ Reexecutar preserva IDs e a data de conclusão do perfil, restaura os dados de d
 
 `[assunção]` (#497) A rota de serviço do Auth citada no card ainda não existe. Usamos dois seeds locais, cada um acessando somente seu banco. A transação é por banco; não há atomicidade entre serviços. Se a segunda execução falhar, corrija o problema e repita. Não rode como parte do Dockerfile ou pipeline.
 
-Após os dois seeds, faça login no Auth (`POST /api/v1/auth/login`) e use o access token no back-end em `GET /api/v1/me`. O Tutor completo retorna `canContract: true` e três pets em `GET /api/v1/me/pets`; o incompleto retorna `canContract: false`. O papel de Administrador é persistido no banco; `/me` ainda não o expõe.
+Após os dois seeds, faça login no Auth (`POST /api/v1/auth/login`) e use o access token no back-end em `GET /api/v1/me`. O Tutor completo retorna `canContract: true` e três pets em `GET /api/v1/me/pets`; o incompleto retorna `canContract: false`. O papel de Administrador é persistido no banco; confirme com `GET /api/v1/admin/me` (`{ id, accountType }`). A recuperação da senha do Administrador é feita no seed do Auth (`SEED_ADMIN_PASSWORD`, #314 / DA-07), não por rota pública.
 
 ### Teste isolado do seed
 
@@ -401,9 +401,9 @@ A ordem é a menor diária primeiro, com desempate pelo `serviceId`, o que deixa
 - O pet que já tem hospedagem no período não filtra a busca; a solicitação responde `409 PET_ALREADY_BOOKED`.
 - `[provisório]` Agenda lida de `provider_blocked_dates` (um dia por linha) até a #482.
 
-## Pets do Tutor: `POST` e `GET /api/v1/me/pets`
+## Pets do Tutor: `/api/v1/me/pets`
 
-Cadastro e listagem dos pets do Tutor (Task #369, HSP-PBI-016-TSK-04). Só Tutor tem pet: o pet aponta para `tutors.id`, e o TUTOR nasce na conclusão do perfil (`PUT /api/v1/me/tutor-profile`). Antes disso, as duas rotas respondem `403 PROFILE_INCOMPLETE`.
+Cadastro e listagem (Task #369, HSP-PBI-016-TSK-04), edição e exclusão (Task #371) dos pets do Tutor. Só Tutor tem pet: o pet aponta para `tutors.id`, e o TUTOR nasce na conclusão do perfil (`PUT /api/v1/me/tutor-profile`). Antes disso, todas as rotas respondem `403 PROFILE_INCOMPLETE`.
 
 **Autenticação:** igual ao `/me`. O Tutor vem só do `sub` do JWT: um `tutorId` no body é recusado como campo fora do contrato, então ninguém cadastra pet para outro Tutor.
 
@@ -439,12 +439,20 @@ Cadastro e listagem dos pets do Tutor (Task #369, HSP-PBI-016-TSK-04). Só Tutor
 | `POST` | `400` | `VALIDATION_ERROR` | Todos os campos inválidos ou fora do domínio, em `details`. Nenhum pet é criado |
 | `GET` | `200` | — | `{ items, page, pageSize, total }` com os pets ativos do Tutor |
 | `GET` | `400` | `VALIDATION_ERROR` | `page` menor que 1 ou `pageSize` fora de 1 a 50 |
-| Ambas | `403` | `PROFILE_INCOMPLETE` | O usuário ainda não é Tutor |
-| Ambas | `401` / `404` | `TOKEN_INVALID` / `USER_NOT_FOUND` | Igual ao `/me` |
+| `PUT /{id}` | `200` | — | Pet atualizado; devolve o pet |
+| `PUT /{id}` | `400` | `VALIDATION_ERROR` | Mesmas regras do `POST`, todos os campos inválidos em `details`. Nada é alterado |
+| `PUT /{id}` e `DELETE /{id}` | `404` | `NOT_FOUND` | Id fora do formato UUID, pet inexistente, de outro Tutor ou já desativado (mesma resposta, para não revelar que existe) |
+| `DELETE /{id}` | `204` | — | Pet desativado |
+| Todas | `403` | `PROFILE_INCOMPLETE` | O usuário ainda não é Tutor |
+| Todas | `401` / `404` | `TOKEN_INVALID` / `USER_NOT_FOUND` | Igual ao `/me` |
 
 - A listagem filtra pelo Tutor do token e por `active`: nunca devolve pet de outro Tutor. Padrão `page=1` e `pageSize=20`.
+- O `PUT` substitui o pet inteiro, com o mesmo body e as mesmas regras do `POST`: campo opcional omitido volta a ser `null`. Para manter um dado, o app reenvia o valor atual.
+- O `DELETE` é exclusão lógica (`active = false`): o pet some da listagem, da busca de Hosts e não pode ser usado em nova solicitação, mas continua no banco para o histórico das reservas. Desativar de novo responde `404`.
 
 **Pendências:**
+
+- \[assunção\] O `DELETE` não confere reservas: um pet com solicitação `requested` ou reserva `awaiting_payment`, `accepted` ou `checked_in` pode ser desativado, e essas reservas continuam valendo. A alternativa é recusar com `409` enquanto houver reserva em andamento. Decisão a fechar na #371.
 
 - \[provisório\] Listas de espécie e porte só na aplicação (`src/pets/pet-policy.js`): a #366, que fecharia os domínios, foi removida. Alinhar com as espécies e portes aceitos pelo Host (#110) e levar para `CHECK` no banco quando forem aprovadas.
 - Vacinas, alergias e medicações em texto livre (`medicalNotes`); foto e documentos do pet fora desta entrega (#370 removida).

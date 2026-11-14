@@ -1,4 +1,4 @@
-// Cadastro e listagem de pets do Tutor (TSK-04 #369), contra o PostgreSQL real. Exige DATABASE_URL.
+// Cadastro e listagem (TSK-04 #369), edição e exclusão (#371) de pets do Tutor, contra o PostgreSQL real. Exige DATABASE_URL.
 // Cria USERs de teste (e-mail it-pet-...@exemplo.com); o Tutor nasce pelo PUT /api/v1/me/tutor-profile real.
 // Remove pets, Tutores, endereços e USERs criados no after. O JWT é assinado por um par de chaves gerado aqui.
 import { test, after } from 'node:test';
@@ -195,4 +195,102 @@ test('paginação inválida: 400 em page e pageSize', async () => {
 
     assert.strictEqual(res.status, 400);
     assert.deepStrictEqual(res.data.details.map((d) => d.field), ['page', 'pageSize']);
+});
+
+// Edição e exclusão (#371)
+const unknownId = '00000000-0000-4000-8000-000000000000';
+
+test('PUT: 200 substitui o pet inteiro e opcional omitido volta a ser nulo', async () => {
+    const { auth } = await newUser();
+    const created = await http.post('/api/v1/me/pets', { ...validPet, medicalNotes: 'Alergia a frango' }, auth);
+
+    const res = await http.put(`/api/v1/me/pets/${created.data.id}`, { name: 'Rex Jr', species: 'dog', size: 'large' }, auth);
+
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(res.data, {
+        id: created.data.id,
+        name: 'Rex Jr',
+        species: 'dog',
+        breed: null,
+        size: 'large',
+        birthDate: null,
+        medicalNotes: null,
+        behavioralNotes: null,
+    });
+    const saved = await prisma.pet.findUnique({ where: { id: created.data.id } });
+    assert.strictEqual(saved.petName, 'Rex Jr');
+});
+
+test('PUT inválido: 400 com os campos, inclusive tutorId, e o pet não muda', async () => {
+    const { auth } = await newUser();
+    const created = await http.post('/api/v1/me/pets', validPet, auth);
+
+    const res = await http.put(`/api/v1/me/pets/${created.data.id}`, { species: 'bird', tutorId: unknownId }, auth);
+
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.data.code, 'VALIDATION_ERROR');
+    assert.deepStrictEqual(res.data.details.map((d) => d.field), ['name', 'species', 'tutorId']);
+    const saved = await prisma.pet.findUnique({ where: { id: created.data.id } });
+    assert.strictEqual(saved.petName, 'Rex');
+});
+
+test('PUT e DELETE em pet de outro Tutor: 404 e o pet não muda', async () => {
+    const owner = await newUser();
+    const other = await newUser();
+    const created = await http.post('/api/v1/me/pets', validPet, owner.auth);
+
+    const put = await http.put(`/api/v1/me/pets/${created.data.id}`, { name: 'Roubado', species: 'cat' }, other.auth);
+    const del = await http.delete(`/api/v1/me/pets/${created.data.id}`, other.auth);
+
+    for (const res of [put, del]) {
+        assert.strictEqual(res.status, 404);
+        assert.strictEqual(res.data.code, 'NOT_FOUND');
+    }
+    const saved = await prisma.pet.findUnique({ where: { id: created.data.id } });
+    assert.strictEqual(saved.petName, 'Rex');
+    assert.strictEqual(saved.active, true);
+});
+
+test('PUT e DELETE com id inválido ou inexistente: 404', async () => {
+    const { auth } = await newUser();
+    const responses = [
+        await http.put('/api/v1/me/pets/nao-e-uuid', validPet, auth),
+        await http.put(`/api/v1/me/pets/${unknownId}`, validPet, auth),
+        await http.delete('/api/v1/me/pets/nao-e-uuid', auth),
+        await http.delete(`/api/v1/me/pets/${unknownId}`, auth),
+    ];
+
+    for (const res of responses) {
+        assert.strictEqual(res.status, 404);
+        assert.strictEqual(res.data.code, 'NOT_FOUND');
+    }
+});
+
+test('DELETE: 204, o pet some da listagem mas fica no banco; repetir ou editar depois dá 404', async () => {
+    const { auth } = await newUser();
+    const created = await http.post('/api/v1/me/pets', validPet, auth);
+
+    const del = await http.delete(`/api/v1/me/pets/${created.data.id}`, auth);
+    assert.strictEqual(del.status, 204);
+
+    const list = await http.get('/api/v1/me/pets', auth);
+    assert.strictEqual(list.data.total, 0);
+    const saved = await prisma.pet.findUnique({ where: { id: created.data.id } });
+    assert.strictEqual(saved.active, false);
+
+    const again = await http.delete(`/api/v1/me/pets/${created.data.id}`, auth);
+    const put = await http.put(`/api/v1/me/pets/${created.data.id}`, validPet, auth);
+    assert.strictEqual(again.status, 404);
+    assert.strictEqual(put.status, 404);
+});
+
+test('perfil incompleto (sem Tutor): 403 PROFILE_INCOMPLETE para editar e excluir', async () => {
+    const { auth } = await newUser({ tutor: false });
+    const put = await http.put(`/api/v1/me/pets/${unknownId}`, validPet, auth);
+    const del = await http.delete(`/api/v1/me/pets/${unknownId}`, auth);
+
+    for (const res of [put, del]) {
+        assert.strictEqual(res.status, 403);
+        assert.strictEqual(res.data.code, 'PROFILE_INCOMPLETE');
+    }
 });

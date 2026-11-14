@@ -89,6 +89,12 @@ test('seed #497/#498: criação, idempotência, HTTP, busca, agenda e rollback',
             const body = await response.json();
             assert.equal(body.items.length, 3);
         }
+        // #314: o Administrador do seed acessa a rota administrativa
+        if (account.accountType === 'admin') {
+            const adminRes = await fetch(`http://localhost:${server.address().port}/api/v1/admin/me`, { headers });
+            assert.equal(adminRes.status, 200);
+            assert.deepEqual(await adminRes.json(), { id: me.user.id, accountType: 'admin' });
+        }
     }
     // #498: os Hosts do seed cobrem os filtros da busca, e pendente e inativo nunca aparecem
     const tokenFor = (sub) => new SignJWT({}).setProtectedHeader({ alg: 'RS256' }).setSubject(sub)

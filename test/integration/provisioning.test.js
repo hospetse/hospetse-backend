@@ -1,4 +1,4 @@
-// Cadastro no back-end (TSK-06 #264): o PUT interno que o Auth chama e o /me em seguida, contra o PostgreSQL real.
+// Cadastro no back-end (TSK-06 #264; endurecimento #314): o PUT interno que o Auth chama e o /me em seguida, contra o PostgreSQL real.
 // Exige DATABASE_URL. Cria USERs de teste (e-mail it-prov-...@exemplo.com) e remove tudo o que criou no after.
 // O token de serviço e o JWT do usuário são gerados aqui: não depende do Auth.
 import { test, after } from 'node:test';
@@ -117,6 +117,20 @@ test('authUserId já vinculado a outro e-mail: 409 AUTH_USER_ID_CONFLICT e o USE
     assert.strictEqual(res.data.code, 'AUTH_USER_ID_CONFLICT');
     const user = await prisma.user.findUnique({ where: { authUserId: id.authUserId } });
     assert.strictEqual(user.email, id.email);
+});
+
+test('accountType no body não cria Administrador: 400 e nenhum USER (#314)', async () => {
+    const id = identity();
+    const res = await http.put(
+        `/api/v1/internal/users/${id.authUserId}`,
+        { email: id.email, name: id.name, accountType: 'admin' },
+        service,
+    );
+
+    assert.strictEqual(res.status, 400);
+    assert.ok(res.data.details.some((d) => d.field === 'accountType'));
+    assert.strictEqual(await countUsers({ authUserId: id.authUserId }), 0);
+    assert.strictEqual(await countUsers({ accountType: 'admin', authUserId: id.authUserId }), 0);
 });
 
 test('senha não chega ao banco: password no body é recusado e a tabela users não tem coluna de senha', async () => {
