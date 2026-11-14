@@ -27,3 +27,24 @@ export async function listPetsService(tutorId, { page, pageSize }) {
     ]);
     return { items, page, pageSize, total };
 }
+
+// Só pet ativo do próprio Tutor (#371). Filtro e escrita na mesma consulta: um pet desativado no meio não é editado.
+// null = inexistente, de outro Tutor ou inativo (o controller responde o mesmo 404).
+export async function updatePetService(tutorId, id, data) {
+    try {
+        return await prisma.pet.update({ where: { id, tutorId, active: true }, data, select: PET_FIELDS });
+    } catch (error) {
+        // P2025 = nenhuma linha casou com o where
+        if (error.code === 'P2025') return null;
+        throw error;
+    }
+}
+
+// Exclusão lógica (#371): preserva o pet para o histórico das reservas.
+export async function deletePetService(tutorId, id) {
+    const result = await prisma.pet.updateMany({
+        where: { id, tutorId, active: true },
+        data: { active: false },
+    });
+    return result.count > 0;
+}

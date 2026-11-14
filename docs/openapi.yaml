@@ -523,6 +523,53 @@ paths:
         '404': { $ref: '#/components/responses/UserNotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /api/v1/me/pets/{id}:
+    put:
+      tags: [Usuário]
+      operationId: updatePet
+      summary: Atualiza um pet ativo do Tutor
+      description: Substitui o pet inteiro, com as mesmas regras do cadastro. Campo opcional omitido volta a ser `null`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PetInput' }
+      responses:
+        '200':
+          description: Pet atualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Pet' }
+        '400':
+          description: Payload inválido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotTutor' }
+        '404': { $ref: '#/components/responses/PetNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [Usuário]
+      operationId: deletePet
+      summary: Desativa um pet do Tutor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Pet desativado }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotTutor' }
+        '404': { $ref: '#/components/responses/PetNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   # Rotas do próprio Host: JWT do usuário → controller (exige ser Host).
   /api/v1/me/host/reservations:
     get:
@@ -1488,6 +1535,12 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
           example: { code: NOT_FOUND, message: Solicitação não encontrada }
+    PetNotFound:
+      description: '`NOT_FOUND`: id inválido, pet inexistente, de outro Tutor ou já desativado (mesma resposta, para não revelar que existe)'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { code: NOT_FOUND, message: Pet não encontrado }
     ContractForbidden:
       description: |
         Não pode contratar. A conta restrita é conferida antes do perfil:

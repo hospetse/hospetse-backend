@@ -17,7 +17,7 @@ import { blockPeriodController, getAgendaController, unblockDayController } from
 import { requireCanContract } from './middlewares/can-contract.js';
 import { requireAdmin } from './middlewares/admin-only.js';
 import { startContractController } from './contracts/contracts.controller.js';
-import { createPetController, listPetsController } from './pets/pet.controller.js';
+import { createPetController, deletePetController, listPetsController, updatePetController } from './pets/pet.controller.js';
 import { createReservationController } from './reservations/create-reservation.controller.js';
 import { listHostReservationsController } from './reservations/list-host-reservations.controller.js';
 import { acceptHostReservationController, rejectHostReservationController } from './reservations/decide-host-reservation.controller.js';
@@ -102,6 +102,8 @@ app.get('/api/v1/hosts/:id', hostDetailsController);
 // Pets do Tutor (TSK-04 #369). Ordem: JWT do usuário → leitura do JSON → controller (exige ser Tutor).
 app.post('/api/v1/me/pets', express.json(), createPetController);
 app.get('/api/v1/me/pets', listPetsController);
+app.put('/api/v1/me/pets/:id', express.json(), updatePetController);
+app.delete('/api/v1/me/pets/:id', deletePetController);
 
 // Solicitação de hospedagem (HSP-PBI-039-TSK-01 #494). Ordem: JWT do usuário → conta e perfil aptos → leitura do JSON → controller.
 app.post('/api/v1/reservations', express.json(), createReservationController);
