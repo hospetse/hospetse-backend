@@ -528,6 +528,7 @@ paths:
       tags: [Usuário]
       operationId: updatePet
       summary: Atualiza um pet ativo do Tutor
+      description: Substitui o pet inteiro, com as mesmas regras do cadastro. Campo opcional omitido volta a ser `null`.
       parameters:
         - name: id
           in: path
@@ -551,7 +552,7 @@ paths:
               schema: { $ref: '#/components/schemas/ValidationError' }
         '401': { $ref: '#/components/responses/TokenInvalid' }
         '403': { $ref: '#/components/responses/NotTutor' }
-        '404': { $ref: '#/components/responses/NotFound' }
+        '404': { $ref: '#/components/responses/PetNotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
     delete:
       tags: [Usuário]
@@ -566,7 +567,7 @@ paths:
         '204': { description: Pet desativado }
         '401': { $ref: '#/components/responses/TokenInvalid' }
         '403': { $ref: '#/components/responses/NotTutor' }
-        '404': { $ref: '#/components/responses/NotFound' }
+        '404': { $ref: '#/components/responses/PetNotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
   # Rotas do próprio Host: JWT do usuário → controller (exige ser Host).
@@ -1534,6 +1535,12 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
           example: { code: NOT_FOUND, message: Solicitação não encontrada }
+    PetNotFound:
+      description: '`NOT_FOUND`: id inválido, pet inexistente, de outro Tutor ou já desativado (mesma resposta, para não revelar que existe)'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { code: NOT_FOUND, message: Pet não encontrado }
     ContractForbidden:
       description: |
         Não pode contratar. A conta restrita é conferida antes do perfil:
