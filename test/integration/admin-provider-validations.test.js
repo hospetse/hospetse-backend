@@ -1,4 +1,4 @@
-// Fila e detalhe da validação de prestadores (#398), contra o PostgreSQL real. Exige DATABASE_URL.
+// Fila, detalhe (#398), aprovação e reprovação (#404) da validação de prestadores, contra o PostgreSQL real. Exige DATABASE_URL.
 // Cria USERs it-admin-validations-* com os cadastros direto no banco e apaga tudo no final. O bucket é o FakeStorage, sem rede.
 // A fila é global e os arquivos de teste rodam em paralelo: cada teste procura os próprios cadastros, sem contar com fila vazia.
 import { test, after } from 'node:test';
@@ -264,4 +264,124 @@ test('usuário comum recebe 403 ADMIN_REQUIRED na fila e no detalhe, sem nenhuma
     }
     // sem token, nem chega na guarda do papel
     assert.strictEqual((await http.get(`/api/v1/admin/provider-validations/${provider.id}`)).status, 401);
+});
+
+// Aprovação e reprovação (#404)
+const approve = async (id, user = admin) => http.post(`/api/v1/admin/provider-validations/${id}/approve`, null, await bearer(user));
+const reject = async (id, body, user = admin) => http.post(`/api/v1/admin/provider-validations/${id}/reject`, body, await bearer(user));
+const ownerOf = (provider) => prisma.user.findUnique({ where: { id: provider.userId } });
+const notificationsOf = (provider) => prisma.notification.findMany({ where: { userId: provider.userId } });
+
+test('aprovação muda para approved, grava autor e data, avisa o prestador e publica o Host', async () => {
+    const { provider } = await createFullProvider();
+    assert.strictEqual((await http.get(`/api/v1/hosts/${provider.id}`, await bearer(common))).status, 404);
+
+    const res = await approve(provider.id);
+
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(Object.keys(res.data).sort(), ['decidedAt', 'providerId', 'rejectionReason', 'validationStatus']);
+    assert.strictEqual(res.data.providerId, provider.id);
+    assert.strictEqual(res.data.validationStatus, 'approved');
+    assert.strictEqual(res.data.rejectionReason, null);
+    const saved = await prisma.provider.findUnique({ where: { id: provider.id } });
+    assert.strictEqual(saved.validationDecidedById, admin.id);
+    assert.strictEqual(saved.validationDecidedAt.toISOString(), res.data.decidedAt);
+    const notifications = await notificationsOf(provider);
+    assert.deepStrictEqual(notifications.map((item) => item.type), ['provider_validation_approved']);
+    assert.deepStrictEqual(JSON.parse(notifications[0].content), { providerId: provider.id, rejectionReason: null });
+    // publicável: aparece nos detalhes públicos e sai da fila
+    assert.strictEqual((await http.get(`/api/v1/hosts/${provider.id}`, await bearer(common))).status, 200);
+    assert.ok(!(await queueIds()).includes(provider.id));
+});
+
+test('reprovação com motivo muda para rejected e o prestador vê o motivo', async () => {
+    const { provider } = await createFullProvider();
+
+    const res = await reject(provider.id, { reason: '  Comprovante de endereço ilegível  ' });
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.data.validationStatus, 'rejected');
+    assert.strictEqual(res.data.rejectionReason, 'Comprovante de endereço ilegível');
+    const saved = await prisma.provider.findUnique({ where: { id: provider.id } });
+    assert.strictEqual(saved.validationDecidedById, admin.id);
+    const notifications = await notificationsOf(provider);
+    assert.deepStrictEqual(notifications.map((item) => item.type), ['provider_validation_rejected']);
+    assert.strictEqual(JSON.parse(notifications[0].content).rejectionReason, 'Comprovante de endereço ilegível');
+
+    const profile = await http.get('/api/v1/me/host', await bearer(await ownerOf(provider)));
+    assert.strictEqual(profile.status, 200);
+    assert.strictEqual(profile.data.validationStatus, 'rejected');
+    assert.strictEqual(profile.data.rejectionReason, 'Comprovante de endereço ilegível');
+    // o prestador não vê quem decidiu
+    assert.ok(!JSON.stringify(profile.data).includes(admin.id));
+    assert.strictEqual((await http.get(`/api/v1/hosts/${provider.id}`, await bearer(common))).status, 404);
+});
+
+test('reprovação sem motivo ou com campo fora do contrato responde 400 e nada muda', async () => {
+    const { provider } = await createFullProvider();
+
+    for (const body of [{}, { reason: '   ' }, { reason: 'x'.repeat(501) }, { reason: 10 }]) {
+        const res = await reject(provider.id, body);
+        assert.strictEqual(res.status, 400, JSON.stringify(body));
+        assert.deepStrictEqual(res.data.details, [{ field: 'reason', message: 'obrigatório, até 500 caracteres' }]);
+    }
+    const extra = await reject(provider.id, { reason: 'ok', validationDecidedBy: common.id });
+    assert.strictEqual(extra.status, 400);
+    assert.deepStrictEqual(extra.data.details, [{ field: 'validationDecidedBy', message: 'não faz parte do contrato' }]);
+
+    const saved = await prisma.provider.findUnique({ where: { id: provider.id } });
+    assert.deepStrictEqual([saved.validationStatus, saved.validationDecidedAt, saved.rejectionReason], ['pending', null, null]);
+    assert.strictEqual((await notificationsOf(provider)).length, 0);
+});
+
+test('cadastro já decidido não recebe segunda decisão', async () => {
+    const { provider } = await createFullProvider();
+    assert.strictEqual((await approve(provider.id)).status, 200);
+    const first = await prisma.provider.findUnique({ where: { id: provider.id } });
+
+    for (const res of [await approve(provider.id), await reject(provider.id, { reason: 'mudei de ideia' })]) {
+        assert.strictEqual(res.status, 409);
+        assert.deepStrictEqual(res.data, { code: 'PROVIDER_ALREADY_DECIDED', message: 'O cadastro já foi decidido' });
+    }
+    const saved = await prisma.provider.findUnique({ where: { id: provider.id } });
+    assert.deepStrictEqual([saved.validationStatus, saved.validationDecidedAt, saved.rejectionReason], ['approved', first.validationDecidedAt, null]);
+    assert.strictEqual((await notificationsOf(provider)).length, 1);
+});
+
+test('duas decisões simultâneas: só uma vale', async () => {
+    const { provider } = await createFullProvider();
+
+    const results = await Promise.all([approve(provider.id), reject(provider.id, { reason: 'Documento vencido' })]);
+
+    assert.deepStrictEqual(results.map((res) => res.status).sort(), [200, 409]);
+    const winner = results.find((res) => res.status === 200).data;
+    const saved = await prisma.provider.findUnique({ where: { id: provider.id } });
+    assert.strictEqual(saved.validationStatus, winner.validationStatus);
+    assert.strictEqual((await notificationsOf(provider)).length, 1);
+});
+
+test('decisão sobre rascunho ou inexistente responde 404; providerId fora do formato, 400', async () => {
+    const { provider: draft } = await createFullProvider({ validationStatus: 'draft' });
+
+    for (const id of [draft.id, randomUUID()]) {
+        assert.deepStrictEqual((await approve(id)).data, { code: 'NOT_FOUND', message: 'Cadastro não encontrado' });
+        assert.strictEqual((await reject(id, { reason: 'x' })).status, 404);
+    }
+    assert.strictEqual((await prisma.provider.findUnique({ where: { id: draft.id } })).validationStatus, 'draft');
+
+    for (const res of [await approve('abc'), await reject('abc', { reason: 'x' })]) {
+        assert.strictEqual(res.status, 400);
+        assert.deepStrictEqual(res.data.details, [{ field: 'providerId', message: 'UUID obrigatório' }]);
+    }
+});
+
+test('usuário sem o papel Administrador recebe 403 e o cadastro continua pendente', async () => {
+    const { provider } = await createFullProvider();
+
+    for (const res of [await approve(provider.id, common), await reject(provider.id, { reason: 'x' }, common)]) {
+        assert.strictEqual(res.status, 403);
+        assert.strictEqual(res.data.code, 'ADMIN_REQUIRED');
+    }
+    assert.strictEqual((await http.post(`/api/v1/admin/provider-validations/${provider.id}/approve`)).status, 401);
+    assert.strictEqual((await prisma.provider.findUnique({ where: { id: provider.id } })).validationStatus, 'pending');
 });
