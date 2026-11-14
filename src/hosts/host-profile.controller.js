@@ -18,6 +18,8 @@ async function toResponse(provider) {
     return {
         id: provider.id,
         validationStatus: provider.validationStatus,
+        // Motivo da reprovação do Administrador (#404); null fora de rejected
+        rejectionReason: provider.validationStatus === 'rejected' ? provider.rejectionReason : null,
         providerType: provider.providerType,
         name: provider.name,
         description: provider.description,

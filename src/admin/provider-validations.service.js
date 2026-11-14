@@ -38,3 +38,35 @@ export async function findPendingProviderService(id) {
     if (!provider) throw new AppError('Cadastro não encontrado', 404, 'NOT_FOUND');
     return provider;
 }
+
+const DECISION_FIELDS = { id: true, validationStatus: true, validationDecidedAt: true, rejectionReason: true };
+
+// Aprovação ou reprovação (#404), uma única vez. O autor vem do req.user (Administrador).
+// Decisão, autor, data, motivo e o evento para o prestador (entrega pela HSP-PBI-064) vão na mesma transação.
+function decide(admin, id, validationStatus, rejectionReason = null) {
+    return prisma.$transaction(async (tx) => {
+        // Rascunho não foi enviado: responde como inexistente
+        const provider = await tx.provider.findFirst({ where: { id, validationStatus: { not: 'draft' } }, select: { userId: true } });
+        if (!provider) throw new AppError('Cadastro não encontrado', 404, 'NOT_FOUND');
+
+        // Filtrar por pending deixa só uma de duas decisões simultâneas alterar a linha
+        const { count } = await tx.provider.updateMany({
+            where: { id, validationStatus: 'pending' },
+            data: { validationStatus, rejectionReason, validationDecidedAt: new Date(), validationDecidedById: admin.id },
+        });
+        if (!count) throw new AppError('O cadastro já foi decidido', 409, 'PROVIDER_ALREADY_DECIDED');
+
+        await tx.notification.create({
+            data: {
+                userId: provider.userId,
+                type: `provider_validation_${validationStatus}`,
+                // JSON para a entrega (HSP-PBI-064) montar o texto
+                content: JSON.stringify({ providerId: id, rejectionReason }),
+            },
+        });
+        return tx.provider.findUnique({ where: { id }, select: DECISION_FIELDS });
+    });
+}
+
+export const approveProviderService = (admin, id) => decide(admin, id, 'approved');
+export const rejectProviderService = (admin, id, reason) => decide(admin, id, 'rejected', reason);

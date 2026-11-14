@@ -6,7 +6,12 @@ import { requireServiceToken } from './middlewares/service-token.js';
 import { provisionUserController } from './users/internal-users.controller.js';
 import { requireUser } from './middlewares/user-token.js';
 import { adminMeController, meController } from './users/me.controller.js';
-import { getProviderValidationController, listProviderValidationsController } from './admin/provider-validations.controller.js';
+import {
+    approveProviderController,
+    getProviderValidationController,
+    listProviderValidationsController,
+    rejectProviderController,
+} from './admin/provider-validations.controller.js';
 import { tutorProfileController } from './tutors/tutor-profile.controller.js';
 import { hostDetailsController } from './hosts/host-details.controller.js';
 import { getHostProfileController, saveHostDraftController, submitHostProfileController } from './hosts/host-profile.controller.js';
@@ -84,6 +89,9 @@ app.get('/api/v1/admin/me', adminMeController);
 // Fila e detalhe da validação de prestadores (#398). Ordem: JWT do usuário → papel Administrador → controller.
 app.get('/api/v1/admin/provider-validations', listProviderValidationsController);
 app.get('/api/v1/admin/provider-validations/:providerId', getProviderValidationController);
+// Aprovação e reprovação (#404). Ordem: JWT do usuário → papel Administrador → (JSON, na reprovação) → controller.
+app.post('/api/v1/admin/provider-validations/:providerId/approve', approveProviderController);
+app.post('/api/v1/admin/provider-validations/:providerId/reject', express.json(), rejectProviderController);
 
 // Provisionamento do USER pelo Auth Server (TSK-01 #259). Ordem: token de serviço → leitura do JSON → controller.
 app.put('/api/v1/internal/users/:authUserId', express.json(), provisionUserController);
