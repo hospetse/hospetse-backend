@@ -35,16 +35,20 @@ const userIds = [];
 const tutorIds = [];
 const reservationIds = [];
 let provider;
+// O teste ponta a ponta grava lançamento (#528), que é só de inserção: nada ligado a ele pode ser apagado.
+// Ele usa Tutor e Host próprios, e o que estiver aqui fica no banco (rode em banco descartável)
+const kept = new Set();
 
 after(async () => {
     server.close();
-    await prisma.paymentTransaction.deleteMany({ where: { reservationId: { in: reservationIds } } });
-    await prisma.reservation.deleteMany({ where: { id: { in: reservationIds } } });
-    await prisma.pet.deleteMany({ where: { tutorId: { in: tutorIds } } });
-    await prisma.tutor.deleteMany({ where: { id: { in: tutorIds } } });
+    const drop = (ids) => ids.filter((id) => !kept.has(id));
+    await prisma.paymentTransaction.deleteMany({ where: { reservationId: { in: drop(reservationIds) } } });
+    await prisma.reservation.deleteMany({ where: { id: { in: drop(reservationIds) } } });
+    await prisma.pet.deleteMany({ where: { tutorId: { in: drop(tutorIds) } } });
+    await prisma.tutor.deleteMany({ where: { id: { in: drop(tutorIds) } } });
     await prisma.service.deleteMany({ where: { providerId: provider.id } });
     await prisma.provider.deleteMany({ where: { id: provider.id } });
-    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+    await prisma.user.deleteMany({ where: { id: { in: drop(userIds) } } });
     await prisma.$disconnect();
 });
 
@@ -77,9 +81,9 @@ provider = await prisma.provider.create({
     include: { services: true },
 });
 
-async function newReservation({ tutor, pet }, status = 'awaiting_payment') {
+async function newReservation({ tutor, pet }, status = 'awaiting_payment', serviceId = provider.services[0].id) {
     const reservation = await prisma.reservation.create({
-        data: { petId: pet.id, tutorId: tutor.id, serviceId: provider.services[0].id, status, startDate: new Date('2030-01-10'), endDate: new Date('2030-01-12'), totalValue: 240.1 },
+        data: { petId: pet.id, tutorId: tutor.id, serviceId, status, startDate: new Date('2030-01-10'), endDate: new Date('2030-01-12'), totalValue: 240.1 },
     });
     reservationIds.push(reservation.id);
     return reservation;
@@ -157,11 +161,15 @@ test('contratação de outro Tutor, inexistente ou com id inválido: 404 igual',
     const ana = await newTutor();
     const beto = await newTutor();
     const reservationOfBeto = await newReservation(beto);
+    const calls = gateway.calls.length;
     for (const id of [reservationOfBeto.id, randomUUID(), 'abc']) {
         const res = await pay(ana.token, id, { paymentMethodToken: 'pm_card_visa' });
         assert.strictEqual(res.status, 404, id);
         assert.strictEqual(res.data.code, 'NOT_FOUND');
     }
+    // Ninguém é cobrado, e a contratação do Beto continua sem pagamento
+    assert.strictEqual(gateway.calls.length, calls);
+    assert.strictEqual(await prisma.paymentTransaction.count({ where: { reservationId: reservationOfBeto.id } }), 0);
 });
 
 test('recusa mantém aguardando pagamento, e outro cartão com outra chave pode pagar', async () => {
@@ -243,4 +251,60 @@ test('comprovante continua disponível para perfil que não pode mais contratar'
 
     assert.strictEqual((await getPayment(ana.token, reservation.id)).status, 200);
     assert.strictEqual((await pay(ana.token, reservation.id, { paymentMethodToken: 'pm_card_visa' })).status, 403);
+});
+
+// #532: o fluxo inteiro da Ana, com o retorno do gateway chegando pelo webhook assinado (HMAC do fake)
+test('pagamento aprovado confirma a contratação depois do retorno do gateway', async () => {
+    const ana = await newTutor();
+    const { user: hostUser } = await newUser();
+    const host = await prisma.provider.create({
+        data: { userId: hostUser.id, providerType: 'hotel', name: 'Hotel do Fluxo Completo', services: { create: [{ name: 'Diária', price: 120.05 }] } },
+        include: { services: true },
+    });
+    const reservation = await newReservation(ana, 'awaiting_payment', host.services[0].id);
+    for (const id of [reservation.id, ana.tutor.id, ana.tutor.userId, hostUser.id]) kept.add(id);
+
+    // 1. A Ana paga: 3D Secure deixa a tentativa pendente, e a contratação ainda aguarda
+    const paid = await pay(ana.token, reservation.id, { paymentMethodToken: 'pm_card_threeDSecure' });
+    assert.strictEqual(paid.status, 202);
+    assert.strictEqual(paid.data.status, 'pending');
+    assert.strictEqual(paid.data.reservationStatus, 'awaiting_payment');
+
+    // 2. O Stripe avisa pelo webhook, com assinatura
+    const transaction = await prisma.paymentTransaction.findUnique({ where: { id: paid.data.transactionId } });
+    const event = { id: `evt_${randomUUID()}`, type: 'payment_intent.succeeded', data: { object: { id: transaction.gatewayPaymentId, metadata: { transactionId: transaction.id } } } };
+    const body = Buffer.from(JSON.stringify(event));
+    const webhook = await http.post('/webhooks/stripe', body, {
+        headers: { 'Content-Type': 'application/json', 'Stripe-Signature': FakePaymentGateway.sign(body) },
+        transformRequest: [(data) => data],
+    });
+    assert.strictEqual(webhook.status, 200);
+
+    // 3. O App consulta o comprovante: pago e contratação confirmada
+    const receipt = await http.get(`/api/v1/contracts/${reservation.id}/payment`, { headers: { Authorization: `Bearer ${ana.token}` } });
+    assert.strictEqual(receipt.data.transactionId, paid.data.transactionId);
+    assert.strictEqual(receipt.data.status, 'approved');
+    assert.strictEqual(receipt.data.reservationStatus, 'accepted');
+
+    // Um lançamento, e o prestador avisado uma vez
+    assert.strictEqual(await prisma.financialEntry.count({ where: { transactionId: transaction.id } }), 1);
+    assert.strictEqual(await prisma.notification.count({ where: { userId: hostUser.id, type: 'payment_approved' } }), 1);
+
+    // 4. Pagar de novo com outra chave: a contratação já não aguarda pagamento
+    const again = await pay(ana.token, reservation.id, { paymentMethodToken: 'pm_card_visa' });
+    assert.strictEqual(again.status, 409);
+    assert.strictEqual(again.data.code, 'RESERVATION_NOT_PAYABLE');
+});
+
+test('valor cobrado é o snapshot da contratação, mesmo com o preço do serviço alterado depois', async () => {
+    const ana = await newTutor();
+    const service = await prisma.service.create({ data: { providerId: provider.id, name: 'Diária com reajuste', price: 120.05 } });
+    const reservation = await newReservation(ana, 'awaiting_payment', service.id);
+    // O Host reajusta a diária depois da solicitação
+    await prisma.service.update({ where: { id: service.id }, data: { price: 999.99 } });
+
+    const res = await pay(ana.token, reservation.id, { paymentMethodToken: 'pm_card_visa' });
+    assert.strictEqual(res.status, 202);
+    assert.strictEqual(res.data.amount, 240.1);
+    assert.strictEqual(gateway.calls.at(-1).amountCents, 24010);
 });
