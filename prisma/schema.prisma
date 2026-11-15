@@ -360,19 +360,28 @@ model PaymentMethod {
 }
 
 model PaymentTransaction {
-  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  reservationId   String?        @map("reservation_id") @db.Uuid
-  providerId      String?        @map("provider_id") @db.Uuid
-  type            String         @db.VarChar(20)
-  status          String         @default("pending") @db.VarChar(20)
-  value           Decimal        @db.Decimal(10, 2)
-  paymentMethodId String?        @map("payment_method_id") @db.Uuid
-  createdDate     DateTime       @default(now()) @map("created_date") @db.Timestamptz(3)
-  reservation     Reservation?   @relation(fields: [reservationId], references: [id])
-  provider        Provider?      @relation(fields: [providerId], references: [id])
-  paymentMethod   PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
-  updatedAt       DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reservationId    String?        @map("reservation_id") @db.Uuid
+  providerId       String?        @map("provider_id") @db.Uuid
+  type             String         @db.VarChar(20)
+  status           String         @default("pending") @db.VarChar(20)
+  value            Decimal        @db.Decimal(10, 2)
+  paymentMethodId  String?        @map("payment_method_id") @db.Uuid
+  // Chave de idempotência da intenção (#527): reenvio com a mesma chave reaproveita o resultado
+  idempotencyKey   String?        @map("idempotency_key") @db.VarChar(100)
+  // Id do PaymentIntent no Stripe (pi_...), que liga o webhook (#528) à transação
+  gatewayPaymentId String?        @unique @map("gateway_payment_id") @db.VarChar(255)
+  // Motivo da recusa devolvido pelo gateway (ex.: card_declined)
+  failureCode      String?        @map("failure_code") @db.VarChar(100)
+  createdDate      DateTime       @default(now()) @map("created_date") @db.Timestamptz(3)
+  reservation      Reservation?   @relation(fields: [reservationId], references: [id])
+  provider         Provider?      @relation(fields: [providerId], references: [id])
+  paymentMethod    PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+  updatedAt        DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
+  // Também existe o índice único parcial payment_transactions_active_payment_idx (só em SQL, migration #527):
+  // ao gerar uma migration nova, conferir que ela não traz DROP INDEX desse índice
+  @@unique([reservationId, idempotencyKey])
   @@index([reservationId])
   @@index([providerId])
   @@index([paymentMethodId])
