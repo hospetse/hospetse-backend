@@ -1,6 +1,7 @@
 import { AppError } from '../lib/app-error.js';
 import { prisma } from '../lib/prisma.js';
 
+// Lançamentos financeiros (tabela financial_entries): o livro-razão (ledger) do Hospetse. Só inserção, garantida por trigger no banco.
 const REASON_MAX = 500;
 
 // Lançamento do pagamento decidido (#528), dentro da transação do webhook. Um único por transação: se já existe

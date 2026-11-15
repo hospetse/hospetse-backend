@@ -11,7 +11,7 @@ import { prisma } from '../../src/lib/prisma.js';
 import { FakePaymentGateway } from '../../src/payments/fake-payment-gateway.js';
 import { usePaymentGateway } from '../../src/payments/payment-gateway.js';
 import { createPaymentIntentService } from '../../src/payments/payment-intent.service.js';
-import { recordCorrectionService } from '../../src/payments/ledger.service.js';
+import { recordCorrectionService } from '../../src/payments/financial-entries.service.js';
 
 try {
     process.loadEnvFile();
