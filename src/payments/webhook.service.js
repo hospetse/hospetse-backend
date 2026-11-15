@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma.js';
-import { recordPaymentEntry } from './ledger.service.js';
+import { recordPaymentEntry } from './financial-entries.service.js';
 
 // Eventos do Stripe tratados na Sprint 8 e o status que levam à transação. Os outros são registrados e ignorados
 const HANDLED = { 'payment_intent.succeeded': 'approved', 'payment_intent.payment_failed': 'rejected' };
