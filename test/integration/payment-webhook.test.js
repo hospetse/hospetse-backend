@@ -49,11 +49,15 @@ const provider = await prisma.provider.create({
     include: { services: true },
 });
 
-// Contratação aguardando pagamento, com uma tentativa já enviada ao gateway (#527)
-async function newPayment(token = 'pm_card_threeDSecure') {
-    const reservation = await prisma.reservation.create({
+function newReservation() {
+    return prisma.reservation.create({
         data: { petId: pet.id, tutorId: tutor.id, serviceId: provider.services[0].id, status: 'awaiting_payment', startDate: new Date('2030-01-10'), endDate: new Date('2030-01-12'), totalValue: 240.1 },
     });
+}
+
+// Contratação aguardando pagamento, com uma tentativa já enviada ao gateway (#527)
+async function newPayment(token = 'pm_card_threeDSecure') {
+    const reservation = await newReservation();
     const transaction = await createPaymentIntentService({ reservation, paymentMethodToken: token, idempotencyKey: randomUUID() });
     return { reservation, transaction };
 }
@@ -195,4 +199,37 @@ test('correção cria novo lançamento ligado ao original, sem alterar o origina
     });
     await assert.rejects(recordCorrectionService(original.id, { amount: 1.001, reason: 'x' }), { statusCode: 400 });
     await assert.rejects(recordCorrectionService(randomUUID(), { amount: 1, reason: 'x' }), { statusCode: 404 });
+});
+
+// Ponta a ponta (#529): o caso mais perigoso para cobrança dupla, com a #527 e a #528 juntas
+test('timeout, webhook aprova antes do reenvio, e o reenvio com a mesma chave não chama o gateway', async () => {
+    const reservation = await newReservation();
+    const idempotencyKey = randomUUID();
+    const pay = () => createPaymentIntentService({ reservation, paymentMethodToken: 'pm_timeout', idempotencyKey });
+
+    // 1. O Stripe cobra, mas a resposta se perde: a transação fica pendente, sem o id do Stripe
+    await assert.rejects(pay(), { statusCode: 503, code: 'PAYMENT_GATEWAY_UNAVAILABLE' });
+    const pending = await prisma.paymentTransaction.findFirst({ where: { reservationId: reservation.id } });
+    assert.strictEqual(pending.status, 'pending');
+    assert.strictEqual(pending.gatewayPaymentId, null);
+
+    // 2. O webhook chega antes do reenvio: acha a transação pelo metadata e confirma tudo
+    const charge = gateway.charges.get(pending.id);
+    const event = { id: `evt_${randomUUID()}`, type: 'payment_intent.succeeded', data: { object: { id: charge.gatewayId, metadata: { transactionId: pending.id } } } };
+    assert.strictEqual((await sendWebhook(event)).status, 200);
+    assert.strictEqual((await prisma.reservation.findUnique({ where: { id: reservation.id } })).status, 'accepted');
+
+    // 3. A Ana toca de novo com a mesma chave: recebe a tentativa aprovada, sem nova chamada ao gateway
+    const callsBefore = gateway.calls.length;
+    const retry = await pay();
+    assert.strictEqual(retry.id, pending.id);
+    assert.strictEqual(retry.status, 'approved');
+    assert.strictEqual(retry.gatewayPaymentId, charge.gatewayId);
+    assert.strictEqual(gateway.calls.length, callsBefore);
+
+    // Uma tentativa, uma cobrança, um lançamento e uma notificação
+    assert.strictEqual(await prisma.paymentTransaction.count({ where: { reservationId: reservation.id } }), 1);
+    assert.strictEqual(gateway.calls.filter((call) => call.idempotencyKey === pending.id).length, 1);
+    assert.strictEqual((await entriesOf(pending.id)).length, 1);
+    assert.strictEqual((await notificationsOf(reservation.id)).length, 1);
 });
