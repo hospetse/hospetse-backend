@@ -135,7 +135,9 @@ test('chave diferente com pagamento pendente ou aprovado: 409 sem nova cobrança
         await pay(reservation, 'k-1', token);
         const calls = gateway.calls.length;
 
-        await assert.rejects(pay(reservation, 'k-2'), { statusCode: 409, code: 'PAYMENT_ALREADY_EXISTS' });
+        // Pendente (3D Secure): tentativa em andamento. Aprovado: a contratação já foi paga
+        const code = token === 'pm_card_visa' ? 'RESERVATION_NOT_PAYABLE' : 'PAYMENT_IN_PROGRESS';
+        await assert.rejects(pay(reservation, 'k-2'), { statusCode: 409, code });
         assert.strictEqual(gateway.calls.length, calls, token);
     }
 });

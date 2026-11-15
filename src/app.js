@@ -28,6 +28,7 @@ import { createReservationController } from './reservations/create-reservation.c
 import { listHostReservationsController } from './reservations/list-host-reservations.controller.js';
 import { acceptHostReservationController, rejectHostReservationController } from './reservations/decide-host-reservation.controller.js';
 import { stripeWebhookController } from './payments/webhook.controller.js';
+import { getContractPaymentController, payContractController } from './payments/contract-payment.controller.js';
 
 // Tempo máximo que /health/ready espera pela verificação do banco.
 export const READY_TIMEOUT_MS = 2000;
@@ -125,6 +126,11 @@ app.delete('/api/v1/me/pets/:id', deletePetController);
 
 // Solicitação de hospedagem (HSP-PBI-039-TSK-01 #494). Ordem: JWT do usuário → conta e perfil aptos → leitura do JSON → controller.
 app.post('/api/v1/reservations', express.json(), createReservationController);
+
+// Pagamento da contratação (HSP-PBI-067-TSK-01 #530). Ordem: JWT do usuário → conta e perfil aptos → JSON → controller.
+app.post('/api/v1/contracts/:id/payment', requireCanContract, express.json(), payContractController);
+// Comprovante do pagamento (#530). Consultar continua liberado para quem não pode mais contratar: só o JWT do usuário.
+app.get('/api/v1/contracts/:id/payment', getContractPaymentController);
 
 // Solicitações recebidas pelo Host (HSP-PBI-041-TSK-01 #485). Ordem: JWT do usuário → controller (exige ser Host).
 app.get('/api/v1/me/host/reservations', listHostReservationsController);

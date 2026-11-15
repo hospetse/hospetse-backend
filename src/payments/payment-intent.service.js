@@ -58,7 +58,13 @@ async function createAttempt(reservation, idempotencyKey) {
         // Corrida com a mesma chave: a outra requisição criou primeiro, e a tentativa dela vale para as duas
         const attempt = await findAttempt(reservation.id, idempotencyKey);
         if (attempt) return attempt;
-        // Chave diferente, mas já existe pagamento pendente ou aprovado (índice parcial da migration #527)
-        throw new AppError('Já existe um pagamento em andamento ou aprovado para esta contratação', 409, 'PAYMENT_ALREADY_EXISTS');
+        // Chave diferente, mas já existe pagamento pendente ou aprovado (índice parcial da migration #527).
+        // Aprovado: a contratação já está paga. Pendente: o App espera o resultado da tentativa em andamento
+        const active = await prisma.paymentTransaction.findFirst({
+            where: { reservationId: reservation.id, type: 'payment', status: { in: ['pending', 'approved'] } },
+            select: { status: true },
+        });
+        if (active?.status === 'approved') throw new AppError('Esta contratação já foi paga', 409, 'RESERVATION_NOT_PAYABLE');
+        throw new AppError('Já existe um pagamento em andamento para esta contratação', 409, 'PAYMENT_IN_PROGRESS');
     }
 }
