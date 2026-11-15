@@ -1250,6 +1250,103 @@ paths:
 
   # shortcut: service-requests e checkout ainda não criam nada e respondem 501 para quem passa pela guarda; as tasks de reserva/checkout definem body e sucesso.
 
+  # Pagamento da contratação (#530): JWT do usuário → conta e perfil aptos → JSON → controller.
+  /api/v1/contracts/{id}/payment:
+    post:
+      tags: [Pagamento]
+      operationId: payContract
+      summary: Paga uma contratação aceita pelo prestador (#530)
+      description: |
+        O Tutor paga uma contratação em `awaiting_payment` com o token do cartão gerado pelo SDK do Stripe no App (ADR-016).
+        Número e CVV nunca chegam ao back-end: o body aceita só `paymentMethodToken`, e qualquer outro campo é recusado.
+        O valor é sempre o `totalValue` da contratação, nunca um valor vindo do App.
+
+        **Idempotência:** uma `Idempotency-Key` por tentativa. Reenviar com a mesma chave (toque duplo, timeout) devolve a mesma
+        tentativa sem nova cobrança, mesmo que a contratação já tenha sido confirmada. [assunção] Com a mesma chave e outro token,
+        vale a tentativa original e o token novo é ignorado. A chave é única por contratação: a mesma chave em outra contratação é outra tentativa.
+
+        **Confirmação:** a contratação só passa para `accepted` pelo webhook (`POST /webhooks/stripe`, #528). Por isso a resposta é 202:
+        `status` é o da tentativa (`approved`, `rejected` ou `pending` para 3D Secure ou timeout) e `reservationStatus` é o da contratação no momento.
+        Na recusa, a contratação continua em `awaiting_payment` e o Tutor tenta de novo com outra chave e outro cartão.
+      security:
+        - userJwt: []
+      parameters:
+        - { name: id, in: path, required: true, description: Id da contratação (reservation), schema: { type: string, format: uuid } }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Gerada pelo App para cada tentativa de pagamento e repetida nos reenvios. Até 100 letras, números, `-` ou `_`
+          schema: { type: string, pattern: '^[\w-]{1,100}$' }
+          example: 4c8e2a9d-1f3b-4e6a-9c0d-7b2a1e5f8d34
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [paymentMethodToken]
+              properties:
+                paymentMethodToken: { type: string, pattern: '^pm_[A-Za-z0-9_]{1,250}$', description: Token do cartão criado pelo Stripe no App, example: pm_card_visa }
+      responses:
+        '202':
+          description: Tentativa registrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContractPayment' }
+              example: { transactionId: b3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d, status: approved, amount: 240.1, failureCode: null, createdAt: '2026-11-15T14:00:00.000Z', reservationStatus: awaiting_payment }
+        '400':
+          description: '`VALIDATION_ERROR`: Idempotency-Key ausente ou fora do formato, token inválido ou campo fora do contrato (ex.: `cardNumber`, `cvv`). O valor recusado não volta na resposta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/ContractForbidden' }
+        '404':
+          description: '`NOT_FOUND`: contratação inexistente, de outro Tutor ou id inválido (mesma resposta, para não revelar que existe)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { code: NOT_FOUND, message: Contratação não encontrada }
+        '409':
+          description: |
+            `RESERVATION_NOT_PAYABLE`: a contratação não está em `awaiting_payment` ou já foi paga. O gateway não é chamado.
+            `PAYMENT_IN_PROGRESS`: já existe uma tentativa pendente (outra chave); aguarde o resultado dela.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/PaymentGatewayUnavailable' }
+
+    get:
+      tags: [Pagamento]
+      operationId: getContractPayment
+      summary: Comprovante do pagamento da contratação (#530)
+      description: |
+        A tentativa de pagamento mais recente da contratação, com o status atual da contratação. O App consulta depois do 202
+        até a tentativa sair de `pending` e a contratação passar para `accepted` (confirmação pelo webhook, #528).
+        Consultar não exige perfil apto (só o JWT): quem não pode mais contratar continua vendo os próprios pagamentos.
+
+        [assunção] O comprovante é a própria tentativa, referenciada pelo `transactionId`. A tela do comprovante é do Mobile (#531)
+        e o extrato com todas as movimentações do Tutor é o HSP-PBI-070, fora da Sprint 8.
+      security:
+        - userJwt: []
+      parameters:
+        - { name: id, in: path, required: true, description: Id da contratação (reservation), schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Tentativa mais recente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContractPayment' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404':
+          description: '`NOT_FOUND`: contratação inexistente, de outro Tutor, id inválido ou ainda sem pagamento'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /api/v1/service-requests:
     post:
       tags: [Contratação]
@@ -1785,6 +1882,17 @@ components:
         birthDate: { type: [string, 'null'], format: date }
         medicalNotes: { type: [string, 'null'] }
         behavioralNotes: { type: [string, 'null'] }
+    ContractPayment:
+      type: object
+      description: Resultado da tentativa de pagamento (#530). Nunca traz dado do cartão
+      required: [transactionId, status, amount, failureCode, createdAt, reservationStatus]
+      properties:
+        transactionId: { type: string, format: uuid, description: Referência da tentativa (comprovante) }
+        status: { type: string, enum: [pending, approved, rejected] }
+        amount: { type: number, description: Valor cobrado em reais, o snapshot da contratação, example: 240.1 }
+        failureCode: { type: [string, 'null'], description: 'Motivo da recusa (ex.: `card_declined`)' }
+        createdAt: { type: string, format: date-time, description: Início da tentativa }
+        reservationStatus: { type: string, description: 'Status da contratação no momento; `accepted` só depois do webhook', example: awaiting_payment }
     PaymentTransaction:
       type: object
       description: |
