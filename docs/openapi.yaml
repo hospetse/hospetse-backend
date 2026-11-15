@@ -1424,6 +1424,41 @@ paths:
               example: { code: NOT_FOUND, message: Conversa não encontrada }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  # Minhas contratações (#533): JWT do usuário → controller (só o Tutor, só as dele).
+  /api/v1/me/contracts:
+    get:
+      tags: [Contratação]
+      operationId: listMyContracts
+      summary: Lista as contratações do Tutor (#533)
+      description: |
+        Todas as contratações do Tutor autenticado (qualquer pet, prestador e status), da mais recente para a mais antiga
+        (data da solicitação, com desempate por `id`). O Tutor vem só do JWT. Filtros por status e período ficam fora da Sprint 8.
+        `type` vem do tipo do prestador: `hospedagem` (Host), `visita` (Pet Sitter) e `passeio` (Pet Walker).
+        `statusLabel` usa os nomes oficiais do Glossário (Estados da contratação). É a porta de entrada para pagar (#530),
+        acompanhar (#542) e conversar (#548).
+      security:
+        - userJwt: []
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        '200':
+          description: Uma página das contratações
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, pageSize, total]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/MyContract' } }
+                  page: { type: integer }
+                  pageSize: { type: integer }
+                  total: { type: integer }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotTutor' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /api/v1/service-requests:
     post:
       tags: [Contratação]
@@ -1985,6 +2020,23 @@ components:
             name: { type: [string, 'null'] }
         text: { type: string }
         sentAt: { type: string, format: date-time }
+    MyContract:
+      type: object
+      description: Uma contratação na lista do Tutor (#533)
+      required: [id, type, status, statusLabel, provider, pet, startDate, endDate, totalValue]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [hospedagem, visita, passeio] }
+        status: { type: string, enum: [requested, awaiting_payment, accepted, checked_in, checked_out, completed, rejected, cancelled] }
+        statusLabel:
+          type: string
+          description: 'Nome oficial do Glossário: Aguardando aceite, Aguardando pagamento, Confirmada, Em andamento, Concluída (checked_out e completed), Recusada ou Cancelada'
+          example: Aguardando pagamento
+        provider: { type: object, properties: { id: { type: string, format: uuid }, name: { type: string } } }
+        pet: { type: object, properties: { id: { type: string, format: uuid }, name: { type: string } } }
+        startDate: { type: string, format: date }
+        endDate: { type: [string, 'null'], format: date }
+        totalValue: { type: number, description: Valor total da contratação (snapshot da solicitação), example: 240.1 }
     ContractPayment:
       type: object
       description: Resultado da tentativa de pagamento (#530). Nunca traz dado do cartão
