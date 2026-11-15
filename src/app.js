@@ -12,6 +12,7 @@ import {
     listProviderValidationsController,
     rejectProviderController,
 } from './admin/provider-validations.controller.js';
+import { getUserController, listUsersController } from './admin/users.controller.js';
 import { tutorProfileController } from './tutors/tutor-profile.controller.js';
 import { hostDetailsController } from './hosts/host-details.controller.js';
 import { getHostProfileController, saveHostDraftController, submitHostProfileController } from './hosts/host-profile.controller.js';
@@ -92,6 +93,10 @@ app.get('/api/v1/admin/provider-validations/:providerId', getProviderValidationC
 // Aprovação e reprovação (#404). Ordem: JWT do usuário → papel Administrador → (JSON, na reprovação) → controller.
 app.post('/api/v1/admin/provider-validations/:providerId/approve', approveProviderController);
 app.post('/api/v1/admin/provider-validations/:providerId/reject', express.json(), rejectProviderController);
+
+// Consulta de usuários com filtros e detalhe (#580). Ordem: JWT do usuário → papel Administrador → controller.
+app.get('/api/v1/admin/users', listUsersController);
+app.get('/api/v1/admin/users/:id', getUserController);
 
 // Provisionamento do USER pelo Auth Server (TSK-01 #259). Ordem: token de serviço → leitura do JSON → controller.
 app.put('/api/v1/internal/users/:authUserId', express.json(), provisionUserController);

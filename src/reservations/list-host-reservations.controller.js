@@ -1,8 +1,7 @@
 import { AppError } from '../lib/app-error.js';
 import { requireHost } from '../hosts/host-policy.js';
 import { listHostReservationsService } from './list-host-reservations.service.js';
-
-const MAX_PAGE_SIZE = 50;
+import { checkQueryFields, isSingleValue, parsePagination } from '../lib/query.js';
 // shortcut: só as pendentes, que é o que a #485 pede; abrir os outros status quando alguma tela precisar
 const STATUSES = ['requested'];
 
@@ -13,14 +12,12 @@ export async function listHostReservationsController(req, res) {
         const host = requireHost(req.user);
 
         const details = [];
-        const status = req.query.status ?? 'requested';
-        const page = req.query.page === undefined ? 1 : Number(req.query.page);
-        const pageSize = req.query.pageSize === undefined ? 20 : Number(req.query.pageSize);
-        if (!STATUSES.includes(status)) details.push({ field: 'status', message: `um de: ${STATUSES.join(', ')}` });
-        if (!Number.isInteger(page) || page < 1) details.push({ field: 'page', message: 'inteiro a partir de 1' });
-        if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
-            details.push({ field: 'pageSize', message: `inteiro de 1 a ${MAX_PAGE_SIZE}` });
-        }
+        const invalid = (field, message) => details.push({ field, message });
+        checkQueryFields(req.query, ['status', 'page', 'pageSize'], invalid);
+        // Repetido já recebeu o erro acima: conta como ausente, para não receber um segundo erro
+        const status = isSingleValue(req.query, 'status') ? req.query.status : 'requested';
+        if (!STATUSES.includes(status)) invalid('status', `um de: ${STATUSES.join(', ')}`);
+        const { page, pageSize } = parsePagination(req.query, invalid);
         if (details.length) {
             return res.status(400).json({ code: 'VALIDATION_ERROR', message: 'Parâmetros inválidos', details });
         }
