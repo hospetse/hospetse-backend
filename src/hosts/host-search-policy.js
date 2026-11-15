@@ -1,8 +1,8 @@
 import { isRealDate } from '../lib/date.js';
 import { PET_SPECIES, PET_SIZES } from '../pets/pet-policy.js';
+import { checkQueryFields, isSingleValue, parsePagination } from '../lib/query.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_PAGE_SIZE = 50;
 const ALLOWED = ['city', 'minPrice', 'maxPrice', 'startDate', 'endDate', 'petId', 'species', 'size', 'breed', 'page', 'pageSize'];
 
 const isText = (value, max) => typeof value === 'string' && value.trim().length >= 1 && value.trim().length <= max;
@@ -14,13 +14,9 @@ export function parseSearchQuery(query) {
     const details = [];
     const invalid = (field, message) => details.push({ field, message });
 
-    // Parâmetro repetido (?city=a&city=b) chega como lista: recusado, para não escolher um dos valores em silêncio
-    for (const [field, value] of Object.entries(query)) {
-        if (!ALLOWED.includes(field)) invalid(field, 'não faz parte do contrato');
-        else if (typeof value !== 'string') invalid(field, 'informe uma única vez');
-    }
+    checkQueryFields(query, ALLOWED, invalid);
     // Valor repetido já recebeu o erro acima: daqui em diante conta como ausente
-    const has = (field) => typeof query[field] === 'string';
+    const has = (field) => isSingleValue(query, field);
     const value = (field) => (has(field) ? query[field] : undefined);
 
     const city = value('city');
@@ -63,12 +59,7 @@ export function parseSearchQuery(query) {
     if (size !== undefined && !PET_SIZES.includes(size)) invalid('size', `um de: ${PET_SIZES.join(', ')}`);
     if (breed !== undefined && !isText(breed, 100)) invalid('breed', 'texto de 1 a 100 caracteres');
 
-    const page = has('page') ? Number(value('page')) : 1;
-    const pageSize = has('pageSize') ? Number(value('pageSize')) : 20;
-    if (!Number.isInteger(page) || page < 1) invalid('page', 'inteiro a partir de 1');
-    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
-        invalid('pageSize', `inteiro de 1 a ${MAX_PAGE_SIZE}`);
-    }
+    const { page, pageSize } = parsePagination(query, invalid);
 
     if (details.length) return { details };
     return {

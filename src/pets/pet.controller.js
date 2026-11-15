@@ -1,11 +1,11 @@
 import { AppError } from '../lib/app-error.js';
+import { checkQueryFields, parsePagination } from '../lib/query.js';
 import { PET_SIZES, PET_SPECIES, requireTutor } from './pet-policy.js';
 import { createPetService, deletePetService, listPetsService, updatePetService } from './pet.service.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 // O id vai para uma coluna UUID: texto em outro formato faria o Prisma lançar erro (500), então já responde 404
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_PAGE_SIZE = 50;
 
 const isText = (value, max) => typeof value === 'string' && value.trim() !== '' && value.trim().length <= max;
 const isOptional = (value) => value === undefined || value === null || value === '';
@@ -88,12 +88,9 @@ export async function listPetsController(req, res) {
     try {
         const tutor = requireTutor(req.user);
         const details = [];
-        const page = req.query.page === undefined ? 1 : Number(req.query.page);
-        const pageSize = req.query.pageSize === undefined ? 20 : Number(req.query.pageSize);
-        if (!Number.isInteger(page) || page < 1) details.push({ field: 'page', message: 'inteiro a partir de 1' });
-        if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
-            details.push({ field: 'pageSize', message: `inteiro de 1 a ${MAX_PAGE_SIZE}` });
-        }
+        const invalid = (field, message) => details.push({ field, message });
+        checkQueryFields(req.query, ['page', 'pageSize'], invalid);
+        const { page, pageSize } = parsePagination(req.query, invalid);
         if (details.length) return res.status(400).json({ code: 'VALIDATION_ERROR', message: 'Parâmetros inválidos', details });
         const result = await listPetsService(tutor.id, { page, pageSize });
         return res.status(200).json({ ...result, items: result.items.map(toResponse) });
