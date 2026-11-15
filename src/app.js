@@ -27,6 +27,7 @@ import { createPetController, deletePetController, listPetsController, updatePet
 import { createReservationController } from './reservations/create-reservation.controller.js';
 import { listHostReservationsController } from './reservations/list-host-reservations.controller.js';
 import { acceptHostReservationController, rejectHostReservationController } from './reservations/decide-host-reservation.controller.js';
+import { stripeWebhookController } from './payments/webhook.controller.js';
 
 // Tempo máximo que /health/ready espera pela verificação do banco.
 export const READY_TIMEOUT_MS = 2000;
@@ -69,6 +70,10 @@ app.get('/health/ready', async (req, res)=>{
 const docsDir = fileURLToPath(new URL('../docs/', import.meta.url));
 app.get('/docs', (req, res) => res.sendFile('index.html', { root: docsDir }));
 app.get('/docs/openapi.yaml', (req, res) => res.type('text/yaml').sendFile('openapi.yaml', { root: docsDir }));
+
+// Retorno do gateway (#528, ADR-016). Fora do /api/v1: quem chama é o Stripe, autenticado pela assinatura, não por JWT.
+// express.raw, e não express.json: a assinatura confere o corpo exatamente como chegou.
+app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), stripeWebhookController);
 
 // Protegido por padrão (TSK-04 #298): tudo sob /api/v1 exige autenticação antes de chegar na rota,
 // então uma rota nova já nasce protegida. As internas usam o token de serviço do Auth; o resto, o JWT do usuário.

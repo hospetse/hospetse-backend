@@ -39,6 +39,8 @@ tags:
     description: Exigem o papel Administrador (#313)
   - name: Contratação
     description: Exigem conta ativa e perfil complete (#263). service-requests e checkout seguem provisórias até as tasks de reserva e checkout
+  - name: Pagamento
+    description: Integração com o Stripe em modo de teste (ADR-016)
 
 paths:
   /health:
@@ -110,6 +112,53 @@ paths:
           content:
             text/yaml:
               schema: { type: string }
+
+  # Retorno do gateway (#528): fora do /api/v1, sem JWT. Autenticado pela assinatura Stripe-Signature, sobre o corpo bruto.
+  /webhooks/stripe:
+    post:
+      tags: [Pagamento]
+      operationId: receiveStripeWebhook
+      summary: Recebe os eventos de pagamento do Stripe (#528)
+      description: |
+        Chamado só pelo Stripe. Única rota de escrita fora do `/api/v1`: o guard global exigiria JWT, e quem prova a origem é a assinatura.
+        - `payment_intent.succeeded`: a transação vai para `approved`, um lançamento é gravado e a contratação sai de `awaiting_payment` para `accepted`, com notificação ao prestador.
+        - `payment_intent.payment_failed`: a transação vai para `rejected`, um lançamento é gravado e a contratação continua em `awaiting_payment`.
+        - Outros tipos, eventos repetidos ou de pagamentos desconhecidos: 200 sem efeito.
+
+        Os lançamentos (`financial_entries`) são só de inserção: não existe rota de alteração nem de exclusão.
+      security: []
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: true
+          description: Assinatura HMAC do corpo, gerada pelo Stripe com o segredo do endpoint (`STRIPE_WEBHOOK_SECRET`)
+          schema: { type: string }
+      requestBody:
+        required: true
+        description: Evento do Stripe (`id` evt_..., `type` e `data.object` com o PaymentIntent). Lido como corpo bruto
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200':
+          description: Evento recebido (processado, repetido ou ignorado)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received: { type: boolean, const: true }
+        '400':
+          description: '`WEBHOOK_SIGNATURE_INVALID`: assinatura ausente, inválida ou antiga. Nada é alterado'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: '`INTERNAL_ERROR`: o Stripe reenvia o evento mais tarde'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503': { $ref: '#/components/responses/PaymentGatewayUnavailable' }
 
   /api/v1/internal/users/{authUserId}:
     put:

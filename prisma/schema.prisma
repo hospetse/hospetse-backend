@@ -269,34 +269,35 @@ model WalkSlot {
 }
 
 model Reservation {
-  id              String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  petId           String               @map("pet_id") @db.Uuid
-  tutorId         String               @map("tutor_id") @db.Uuid
-  serviceId       String               @map("service_id") @db.Uuid
-  walkSlotId      String?              @map("walk_slot_id") @db.Uuid
+  id               String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  petId            String               @map("pet_id") @db.Uuid
+  tutorId          String               @map("tutor_id") @db.Uuid
+  serviceId        String               @map("service_id") @db.Uuid
+  walkSlotId       String?              @map("walk_slot_id") @db.Uuid
   // requested, awaiting_payment (aceita pelo Host, #491), accepted, rejected, checked_in, checked_out, cancelled ou completed
-  status          String               @default("requested") @db.VarChar(20)
-  rejectionReason String?              @map("rejection_reason") @db.VarChar(500)
-  decidedAt       DateTime?            @map("decided_at") @db.Timestamptz(3)
-  startDate       DateTime             @map("start_date") @db.Timestamptz(3)
-  endDate         DateTime?            @map("end_date") @db.Timestamptz(3)
-  createdDate     DateTime             @default(now()) @map("created_date") @db.Timestamptz(3)
-  totalValue      Decimal              @map("total_value") @db.Decimal(10, 2)
+  status           String               @default("requested") @db.VarChar(20)
+  rejectionReason  String?              @map("rejection_reason") @db.VarChar(500)
+  decidedAt        DateTime?            @map("decided_at") @db.Timestamptz(3)
+  startDate        DateTime             @map("start_date") @db.Timestamptz(3)
+  endDate          DateTime?            @map("end_date") @db.Timestamptz(3)
+  createdDate      DateTime             @default(now()) @map("created_date") @db.Timestamptz(3)
+  totalValue       Decimal              @map("total_value") @db.Decimal(10, 2)
   // Snapshot da diária no momento da solicitação (#494): mudar o preço do serviço depois não altera a solicitação
-  dailyPrice      Decimal?             @map("daily_price") @db.Decimal(10, 2)
-  notes           String?              @db.VarChar(1000)
+  dailyPrice       Decimal?             @map("daily_price") @db.Decimal(10, 2)
+  notes            String?              @db.VarChar(1000)
   // Header Idempotency-Key (#494): o reenvio da mesma intenção devolve a solicitação já criada
-  idempotencyKey  String?              @map("idempotency_key") @db.VarChar(100)
-  pet             Pet                  @relation(fields: [petId], references: [id])
-  tutor           Tutor                @relation(fields: [tutorId], references: [id])
-  service         Service              @relation(fields: [serviceId], references: [id])
-  walkSlot        WalkSlot?            @relation(fields: [walkSlotId], references: [id])
-  activityLogs    PetActivityLog[]
-  review          Review?
-  transactions    PaymentTransaction[]
-  couponUsages    CouponUsage[]
-  conversations   Conversation[]
-  updatedAt       DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  idempotencyKey   String?              @map("idempotency_key") @db.VarChar(100)
+  pet              Pet                  @relation(fields: [petId], references: [id])
+  tutor            Tutor                @relation(fields: [tutorId], references: [id])
+  service          Service              @relation(fields: [serviceId], references: [id])
+  walkSlot         WalkSlot?            @relation(fields: [walkSlotId], references: [id])
+  activityLogs     PetActivityLog[]
+  review           Review?
+  transactions     PaymentTransaction[]
+  financialEntries FinancialEntry[]
+  couponUsages     CouponUsage[]
+  conversations    Conversation[]
+  updatedAt        DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@unique([tutorId, idempotencyKey])
   @@index([petId])
@@ -367,24 +368,25 @@ model PaymentMethod {
 }
 
 model PaymentTransaction {
-  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  reservationId    String?        @map("reservation_id") @db.Uuid
-  providerId       String?        @map("provider_id") @db.Uuid
-  type             String         @db.VarChar(20)
-  status           String         @default("pending") @db.VarChar(20)
-  value            Decimal        @db.Decimal(10, 2)
-  paymentMethodId  String?        @map("payment_method_id") @db.Uuid
+  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reservationId    String?          @map("reservation_id") @db.Uuid
+  providerId       String?          @map("provider_id") @db.Uuid
+  type             String           @db.VarChar(20)
+  status           String           @default("pending") @db.VarChar(20)
+  value            Decimal          @db.Decimal(10, 2)
+  paymentMethodId  String?          @map("payment_method_id") @db.Uuid
   // Chave de idempotência da intenção (#527): reenvio com a mesma chave reaproveita o resultado
-  idempotencyKey   String?        @map("idempotency_key") @db.VarChar(100)
+  idempotencyKey   String?          @map("idempotency_key") @db.VarChar(100)
   // Id do PaymentIntent no Stripe (pi_...), que liga o webhook (#528) à transação
-  gatewayPaymentId String?        @unique @map("gateway_payment_id") @db.VarChar(255)
+  gatewayPaymentId String?          @unique @map("gateway_payment_id") @db.VarChar(255)
   // Motivo da recusa devolvido pelo gateway (ex.: card_declined)
-  failureCode      String?        @map("failure_code") @db.VarChar(100)
-  createdDate      DateTime       @default(now()) @map("created_date") @db.Timestamptz(3)
-  reservation      Reservation?   @relation(fields: [reservationId], references: [id])
-  provider         Provider?      @relation(fields: [providerId], references: [id])
-  paymentMethod    PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
-  updatedAt        DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  failureCode      String?          @map("failure_code") @db.VarChar(100)
+  createdDate      DateTime         @default(now()) @map("created_date") @db.Timestamptz(3)
+  reservation      Reservation?     @relation(fields: [reservationId], references: [id])
+  provider         Provider?        @relation(fields: [providerId], references: [id])
+  paymentMethod    PaymentMethod?   @relation(fields: [paymentMethodId], references: [id])
+  financialEntries FinancialEntry[]
+  updatedAt        DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   // Também existe o índice único parcial payment_transactions_active_payment_idx (só em SQL, migration #527):
   // ao gerar uma migration nova, conferir que ela não traz DROP INDEX desse índice
@@ -394,6 +396,42 @@ model PaymentTransaction {
   @@index([paymentMethodId])
   @@index([type, status])
   @@map("payment_transactions")
+}
+
+// Aviso do gateway (evt_...) já recebido, inclusive os ignorados (#528). A PK impede processar o mesmo aviso duas vezes
+model PaymentEvent {
+  id         String   @id @db.VarChar(255)
+  type       String   @db.VarChar(100)
+  receivedAt DateTime @default(now()) @map("received_at") @db.Timestamptz(3)
+
+  @@map("payment_events")
+}
+
+// SÓ INSERÇÃO (#528, RF-PAG-09): um trigger no banco recusa UPDATE e DELETE. Correção é um novo lançamento com originalEntryId.
+// tutorId e providerId são o snapshot do momento, sem FK. Também existe o índice único parcial financial_entries_payment_once_idx (só em SQL)
+model FinancialEntry {
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transactionId   String             @map("transaction_id") @db.Uuid
+  reservationId   String             @map("reservation_id") @db.Uuid
+  tutorId         String             @map("tutor_id") @db.Uuid
+  providerId      String             @map("provider_id") @db.Uuid
+  // payment ou correction
+  type            String             @db.VarChar(20)
+  amount          Decimal            @db.Decimal(10, 2)
+  // approved ou rejected
+  status          String             @db.VarChar(20)
+  originalEntryId String?            @map("original_entry_id") @db.Uuid
+  reason          String?            @db.VarChar(500)
+  createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  transaction     PaymentTransaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  reservation     Reservation        @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+  originalEntry   FinancialEntry?    @relation("EntryCorrection", fields: [originalEntryId], references: [id], onDelete: Restrict)
+  corrections     FinancialEntry[]   @relation("EntryCorrection")
+
+  @@index([transactionId])
+  @@index([reservationId])
+  @@index([originalEntryId])
+  @@map("financial_entries")
 }
 
 model Coupon {

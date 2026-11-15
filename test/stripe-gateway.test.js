@@ -80,7 +80,7 @@ test('sem STRIPE_SECRET_KEY: 503 no primeiro uso', (t) => {
 test('webhook com assinatura inválida: 400, sem vazar o segredo no log', (t) => {
     const log = t.mock.method(console, 'log', () => {});
     const gateway = new StripeGateway({ STRIPE_WEBHOOK_SECRET: 'whsec_x' }, fakeClient());
-    assert.throws(() => gateway.parseWebhook(Buffer.from('{}'), 'assinatura-falsa'), { statusCode: 400, code: 'INVALID_SIGNATURE' });
+    assert.throws(() => gateway.parseWebhook(Buffer.from('{}'), 'assinatura-falsa'), { statusCode: 400, code: 'WEBHOOK_SIGNATURE_INVALID' });
     const logged = log.mock.calls.flatMap((call) => call.arguments).join(' ');
     assert.ok(!logged.includes(SECRET));
 });

@@ -60,7 +60,7 @@ export class StripeGateway {
             return this.client.webhooks.constructEvent(rawBody, signature, this.webhookSecret);
         } catch (error) {
             console.log(`stripe webhook: ${error.type ?? error.name}`);
-            throw new AppError('Assinatura do webhook inválida', 400, 'INVALID_SIGNATURE');
+            throw new AppError('Assinatura do webhook inválida', 400, 'WEBHOOK_SIGNATURE_INVALID');
         }
     }
 }
