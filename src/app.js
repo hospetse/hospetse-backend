@@ -30,6 +30,7 @@ import { acceptHostReservationController, rejectHostReservationController } from
 import { stripeWebhookController } from './payments/webhook.controller.js';
 import { getContractPaymentController, payContractController } from './payments/contract-payment.controller.js';
 import { listMessagesController, openConversationController } from './conversations/conversation.controller.js';
+import { listMyContractsController } from './contracts/my-contracts.controller.js';
 
 // Tempo máximo que /health/ready espera pela verificação do banco.
 export const READY_TIMEOUT_MS = 2000;
@@ -136,6 +137,9 @@ app.get('/api/v1/contracts/:id/payment', getContractPaymentController);
 // Conversa da contratação (HSP-PBI-055-TSK-02 #548). Ordem: JWT do usuário → controller (Tutor ou Host da contratação).
 app.post('/api/v1/contracts/:id/conversation', openConversationController);
 app.get('/api/v1/conversations/:id/messages', listMessagesController);
+
+// Minhas contratações (HSP-PBI-046-TSK-01 #533). Ordem: JWT do usuário → controller (só o Tutor, só as dele).
+app.get('/api/v1/me/contracts', listMyContractsController);
 
 // Solicitações recebidas pelo Host (HSP-PBI-041-TSK-01 #485). Ordem: JWT do usuário → controller (exige ser Host).
 app.get('/api/v1/me/host/reservations', listHostReservationsController);
