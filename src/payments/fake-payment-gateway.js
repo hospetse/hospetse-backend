@@ -45,10 +45,12 @@ export class FakePaymentGateway {
     }
 
     parseWebhook(rawBody, signature) {
+        // Sem Content-Type JSON, o express.raw não lê o corpo: mesma resposta de assinatura inválida, como no Stripe
+        if (!Buffer.isBuffer(rawBody)) throw new AppError('Assinatura do webhook inválida', 400, 'WEBHOOK_SIGNATURE_INVALID');
         const expected = Buffer.from(FakePaymentGateway.sign(rawBody));
         const received = Buffer.from(String(signature ?? ''));
         if (expected.length !== received.length || !timingSafeEqual(expected, received)) {
-            throw new AppError('Assinatura do webhook inválida', 400, 'INVALID_SIGNATURE');
+            throw new AppError('Assinatura do webhook inválida', 400, 'WEBHOOK_SIGNATURE_INVALID');
         }
         return JSON.parse(rawBody.toString());
     }
