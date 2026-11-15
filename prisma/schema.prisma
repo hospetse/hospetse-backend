@@ -37,6 +37,7 @@ model User {
   createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
   tutor              Tutor?
   provider           Provider?
+  decidedValidations Provider[]     @relation("ProviderValidationDecidedBy")
   notifications      Notification[]
   penalties          Penalty[]      @relation("PenalizedUser")
   appliedPenalties   Penalty[]      @relation("PenaltyAppliedBy")
@@ -71,46 +72,52 @@ model Tutor {
 }
 
 model Provider {
-  id               String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId           String                 @unique @map("user_id") @db.Uuid
-  providerType     String                 @map("provider_type") @db.VarChar(30)
-  name             String                 @db.VarChar(255)
-  cpfCnpj          String?                @unique @map("cpf_cnpj") @db.VarChar(18)
-  addressId        String?                @unique @map("address_id") @db.Uuid
-  rating           Decimal?               @db.Decimal(3, 2)
+  id                    String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                String                 @unique @map("user_id") @db.Uuid
+  providerType          String                 @map("provider_type") @db.VarChar(30)
+  name                  String                 @db.VarChar(255)
+  cpfCnpj               String?                @unique @map("cpf_cnpj") @db.VarChar(18)
+  addressId             String?                @unique @map("address_id") @db.Uuid
+  rating                Decimal?               @db.Decimal(3, 2)
   // Chave no bucket ou URL externa (seed). A API devolve sempre URL (publicFileUrl, #324)
-  urlPicture       String?                @map("url_picture") @db.VarChar(2048)
-  status           String                 @default("active") @db.VarChar(20)
+  urlPicture            String?                @map("url_picture") @db.VarChar(2048)
+  status                String                 @default("active") @db.VarChar(20)
   // draft (rascunho, #325), pending, approved ou rejected (#323): só approved aparece nas consultas públicas
-  validationStatus String                 @default("pending") @map("validation_status") @db.VarChar(20)
-  description      String?                @db.VarChar(2000)
+  validationStatus      String                 @default("pending") @map("validation_status") @db.VarChar(20)
+  description           String?                @db.VarChar(2000)
   // Quando o cadastro foi enviado para validação (#398): ordena a fila do Administrador. updatedAt não serve, muda a cada edição
-  submittedAt      DateTime?              @map("submitted_at") @db.Timestamptz(3)
+  submittedAt           DateTime?              @map("submitted_at") @db.Timestamptz(3)
+  // Decisão do Administrador (#404): quem decidiu, quando e o motivo da reprovação, gravados juntos com o validation_status
+  validationDecidedAt   DateTime?              @map("validation_decided_at") @db.Timestamptz(3)
+  validationDecidedById String?                @map("validation_decided_by") @db.Uuid
+  rejectionReason       String?                @map("rejection_reason") @db.VarChar(500)
   // Restrições aceitas, com os mesmos valores de pets.pet_species/pet_size/pet_breed. Raças vazias = aceita todas
-  acceptedSpecies  String[]               @default([]) @map("accepted_species") @db.VarChar(100)
-  acceptedSizes    String[]               @default([]) @map("accepted_sizes") @db.VarChar(30)
-  acceptedBreeds   String[]               @default([]) @map("accepted_breeds") @db.VarChar(100)
-  createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
-  user             User                   @relation(fields: [userId], references: [id])
-  address          Address?               @relation(fields: [addressId], references: [id])
-  photos           ProviderPhoto[]
-  documents        ProviderDocument[]
-  hotelDetail      HotelDetail?
-  petSitterDetail  PetSitterDetail?
-  petWalkerDetail  PetWalkerDetail?
-  services         Service[]
-  workingHours     ProviderWorkingHours[]
-  blockedDates     ProviderBlockedDate[]
-  walkSlots        WalkSlot[]
-  reviews          Review[]
-  favorites        Favorite[]
-  transactions     PaymentTransaction[]
-  faqs             ProviderFaq[]
-  conversations    Conversation[]
-  updatedAt        DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  acceptedSpecies       String[]               @default([]) @map("accepted_species") @db.VarChar(100)
+  acceptedSizes         String[]               @default([]) @map("accepted_sizes") @db.VarChar(30)
+  acceptedBreeds        String[]               @default([]) @map("accepted_breeds") @db.VarChar(100)
+  createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  user                  User                   @relation(fields: [userId], references: [id])
+  validationDecidedBy   User?                  @relation("ProviderValidationDecidedBy", fields: [validationDecidedById], references: [id], onDelete: Restrict)
+  address               Address?               @relation(fields: [addressId], references: [id])
+  photos                ProviderPhoto[]
+  documents             ProviderDocument[]
+  hotelDetail           HotelDetail?
+  petSitterDetail       PetSitterDetail?
+  petWalkerDetail       PetWalkerDetail?
+  services              Service[]
+  workingHours          ProviderWorkingHours[]
+  blockedDates          ProviderBlockedDate[]
+  walkSlots             WalkSlot[]
+  reviews               Review[]
+  favorites             Favorite[]
+  transactions          PaymentTransaction[]
+  faqs                  ProviderFaq[]
+  conversations         Conversation[]
+  updatedAt             DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([providerType])
   @@index([validationStatus, submittedAt])
+  @@index([validationDecidedById])
   @@map("providers")
 }
 

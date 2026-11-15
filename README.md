@@ -699,6 +699,34 @@ Rotas usadas por quem quer ser Host (Task #325, HSP-PBI-008-TSK-05). Contrato co
 - \[assunção\] A "estrutura" do HSP-PBI-008-AC-01 fica na `description`, porque não tem campo próprio. Validar com a PO.
 - Reenvio de cadastro rejeitado depende do fluxo de aprovação.
 
+## Decisão da validação: `POST /api/v1/admin/provider-validations/{providerId}/approve` e `/reject`
+
+Aprovação e reprovação de um cadastro pendente pelo Administrador (Task #404, HSP-PBI-022-TSK-04). A fila e o detalhe (#398) estão no `docs/openapi.yaml`.
+
+**Autenticação:** JWT do usuário e papel Administrador (`403 ADMIN_REQUIRED`, guarda da #313). O autor da decisão vem só do token.
+
+**Regras:**
+
+- Só `pending` é decidido, uma única vez. A troca usa `updateMany ... WHERE validation_status = 'pending'`: com duas decisões ao mesmo tempo, só uma altera a linha e a outra recebe `409`.
+- A aprovação vai para `approved`. O prestador passa a aparecer na busca e nos detalhes públicos e a receber solicitações (`ELIGIBLE_HOST`).
+- A reprovação exige `reason` (até 500 caracteres, sem espaços nas pontas) e vai para `rejected`. O motivo aparece para o prestador em `GET /api/v1/me/host` (`rejectionReason`). Quem decidiu não aparece.
+- `validation_decided_by`, `validation_decided_at`, `rejection_reason` e o evento em `notifications` (`provider_validation_approved` ou `provider_validation_rejected`, entrega pela HSP-PBI-064) são gravados na mesma transação. A FK do autor é `RESTRICT`, então o Administrador não pode ser apagado enquanto houver decisão dele.
+
+| Situação | Resposta |
+| --- | --- |
+| Decisão gravada | `200` `{ providerId, validationStatus, decidedAt, rejectionReason }` |
+| `providerId` fora do formato UUID, `reason` inválido ou campo fora do contrato | `400 VALIDATION_ERROR` com todos os `details` |
+| Sem token | `401` |
+| Sem o papel Administrador | `403 ADMIN_REQUIRED` |
+| Cadastro inexistente ou em rascunho | `404 NOT_FOUND` |
+| Já aprovado ou reprovado | `409 PROVIDER_ALREADY_DECIDED` |
+
+**Pendências:**
+
+- `[assunção]` A auditoria fica nas colunas do próprio cadastro (última decisão). A trilha imutável das ações administrativas é da HSP-PBI-023-TSK-01 (#413).
+- `[assunção]` O Administrador pode decidir o próprio cadastro de prestador. Validar com a PO se precisa bloquear.
+- O reenvio do cadastro reprovado ainda não existe. Quando existir, precisa limpar o motivo e guardar o histórico das decisões anteriores (a #403, que modelaria o histórico, foi removida).
+
 ## Deploy (Railway)
 
 O back-end roda no Railway (projeto `superb-recreation`, serviço `backend`, ambiente `production`): https://backend-production-7298.up.railway.app. URLs e contratos para o Mobile estão na wiki, em Index/Desenvolvimento/Back-end/APIs publicadas - URLs e contratos.
