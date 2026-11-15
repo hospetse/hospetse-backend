@@ -2,7 +2,12 @@ import { AppError } from '../lib/app-error.js';
 import { maskDocument } from '../lib/mask.js';
 import { getStorage, publicFileUrl, signedUrlSeconds } from '../lib/storage.js';
 import { parseValidationQueueQuery } from './provider-validations-policy.js';
-import { findPendingProviderService, listPendingProvidersService } from './provider-validations.service.js';
+import {
+    approveProviderService,
+    findPendingProviderService,
+    listPendingProvidersService,
+    rejectProviderService,
+} from './provider-validations.service.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -33,10 +38,50 @@ export async function listProviderValidationsController(req, res) {
 // [assunção] O registro de quem visualizou os documentos fica para depois da #396, que fecha a regra da LGPD.
 export async function getProviderValidationController(req, res) {
     try {
-        if (!UUID.test(req.params.providerId)) {
-            throw new AppError('Parâmetros inválidos', 400, 'VALIDATION_ERROR', [{ field: 'providerId', message: 'UUID obrigatório' }]);
-        }
+        assertProviderId(req.params.providerId);
         return res.status(200).json(await toDetail(await findPendingProviderService(req.params.providerId)));
+    } catch (error) {
+        return sendError(res, error);
+    }
+}
+
+function assertProviderId(providerId) {
+    if (!UUID.test(providerId)) {
+        throw new AppError('Parâmetros inválidos', 400, 'VALIDATION_ERROR', [{ field: 'providerId', message: 'UUID obrigatório' }]);
+    }
+}
+
+const toDecision = (provider) => ({
+    providerId: provider.id,
+    validationStatus: provider.validationStatus,
+    decidedAt: provider.validationDecidedAt.toISOString(),
+    rejectionReason: provider.rejectionReason,
+});
+
+// POST /api/v1/admin/provider-validations/:providerId/approve (#404), sem body.
+export async function approveProviderController(req, res) {
+    try {
+        assertProviderId(req.params.providerId);
+        return res.status(200).json(toDecision(await approveProviderService(req.user, req.params.providerId)));
+    } catch (error) {
+        return sendError(res, error);
+    }
+}
+
+// POST /api/v1/admin/provider-validations/:providerId/reject (#404). Body { reason }: o prestador vê o motivo no GET /me/host.
+export async function rejectProviderController(req, res) {
+    try {
+        assertProviderId(req.params.providerId);
+        const { reason, ...extra } = req.body ?? {};
+        const details = [];
+        if (typeof reason !== 'string' || reason.trim() === '' || reason.trim().length > 500) {
+            details.push({ field: 'reason', message: 'obrigatório, até 500 caracteres' });
+        }
+        for (const field of Object.keys(extra)) details.push({ field, message: 'não faz parte do contrato' });
+        if (details.length) {
+            return res.status(400).json({ code: 'VALIDATION_ERROR', message: 'Payload inválido', details });
+        }
+        return res.status(200).json(toDecision(await rejectProviderService(req.user, req.params.providerId, reason.trim())));
     } catch (error) {
         return sendError(res, error);
     }
