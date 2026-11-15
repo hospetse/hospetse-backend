@@ -32,7 +32,12 @@ test('envia valor em centavos, token, confirmação e a chave de idempotência',
 
     const [{ params, options }] = client.received;
     assert.deepStrictEqual(params, {
-        amount: 24010, currency: 'brl', payment_method: 'pm_card_visa', payment_method_types: ['card'], confirm: true, metadata: { reservationId: 'r-1' },
+        amount: 24010,
+        currency: 'brl',
+        payment_method: 'pm_card_visa',
+        automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+        confirm: true,
+        metadata: { reservationId: 'r-1' },
     });
     assert.deepStrictEqual(options, { idempotencyKey: 'tx-1' });
 });

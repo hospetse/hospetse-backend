@@ -32,7 +32,9 @@ export class StripeGateway {
                     amount: amountCents,
                     currency,
                     payment_method: paymentMethodToken,
-                    payment_method_types: ['card'],
+                    // Os métodos aceitos vêm do Dashboard (o Stripe aposentou payment_method_types). Sem redirecionamento:
+                    // o back-end confirma direto, e um método que exige sair do App não tem para onde voltar
+                    automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
                     confirm: true,
                     metadata,
                 },
