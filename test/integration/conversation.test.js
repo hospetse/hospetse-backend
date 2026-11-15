@@ -29,16 +29,18 @@ const http = axios.create({ baseURL: `http://localhost:${server.address().port}`
 const userIds = [];
 const tutorIds = [];
 const reservationIds = [];
+const providerIds = [];
+const conversationIds = [];
 
 after(async () => {
     server.close();
     // as mensagens saem em cascata com a conversa
-    await prisma.conversation.deleteMany({ where: { reservationId: { in: reservationIds } } });
+    await prisma.conversation.deleteMany({ where: { OR: [{ reservationId: { in: reservationIds } }, { id: { in: conversationIds } }] } });
     await prisma.reservation.deleteMany({ where: { id: { in: reservationIds } } });
     await prisma.pet.deleteMany({ where: { tutorId: { in: tutorIds } } });
     await prisma.tutor.deleteMany({ where: { id: { in: tutorIds } } });
-    await prisma.service.deleteMany({ where: { providerId: provider.id } });
-    await prisma.provider.deleteMany({ where: { id: provider.id } });
+    await prisma.service.deleteMany({ where: { providerId: { in: providerIds } } });
+    await prisma.provider.deleteMany({ where: { id: { in: providerIds } } });
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     await prisma.$disconnect();
 });
@@ -70,6 +72,7 @@ const provider = await prisma.provider.create({
     data: { userId: host.user.id, providerType: 'hotel', name: 'Hotelzinho de Teste', services: { create: [{ name: 'Diária', price: 120.05 }] } },
     include: { services: true },
 });
+providerIds.push(provider.id);
 
 async function newReservation({ tutor, pet }, status = 'requested') {
     const reservation = await prisma.reservation.create({
@@ -181,4 +184,49 @@ test('histórico vazio e paginação inválida', async () => {
     const invalid = await history(ana.token, conversation.id, '?pageSize=51&foo=1');
     assert.strictEqual(invalid.status, 400);
     assert.deepStrictEqual(invalid.data.details.map((d) => d.field).sort(), ['foo', 'pageSize']);
+});
+
+// #550: casos de borda do acesso e do histórico
+test('o Host pode abrir primeiro (201) e o Tutor reabre a mesma (200)', async () => {
+    const ana = await newTutor('Ana');
+    const reservation = await newReservation(ana);
+    const byHost = await open(host.token, reservation.id);
+    assert.strictEqual(byHost.status, 201);
+    const byTutor = await open(ana.token, reservation.id);
+    assert.strictEqual(byTutor.status, 200);
+    assert.strictEqual(byTutor.data.id, byHost.data.id);
+});
+
+test('prestador de outra contratação não abre nem lê: 404 sem dados', async () => {
+    const ana = await newTutor('Ana');
+    const reservation = await newReservation(ana);
+    const conversation = (await open(ana.token, reservation.id)).data;
+    const otherHost = await newUser('Outro Hotel');
+    const other = await prisma.provider.create({ data: { userId: otherHost.user.id, providerType: 'hotel', name: 'Outro Hotel' } });
+    providerIds.push(other.id);
+
+    const opened = await open(otherHost.token, reservation.id);
+    assert.strictEqual(opened.status, 404);
+    assert.strictEqual(opened.data.participants, undefined);
+    const read = await history(otherHost.token, conversation.id);
+    assert.strictEqual(read.status, 404);
+    assert.strictEqual(read.data.items, undefined);
+});
+
+test('mensagem antiga sem autor gravado mostra o nome da parte daquele papel', async () => {
+    const ana = await newTutor('Ana');
+    const reservation = await newReservation(ana);
+    const conversation = (await open(ana.token, reservation.id)).data;
+    await prisma.message.create({ data: { conversationId: conversation.id, senderType: 'host', content: 'olá' } });
+
+    const res = await history(ana.token, conversation.id);
+    assert.deepStrictEqual(res.data.items[0].author, { role: 'host', name: 'Hotelzinho de Teste' });
+});
+
+test('conversa antiga sem contratação (legado do assistente): histórico 404 até para o Tutor dela', async () => {
+    const ana = await newTutor('Ana');
+    const legacy = await prisma.conversation.create({ data: { tutorId: ana.tutor.id, providerId: provider.id } });
+    conversationIds.push(legacy.id);
+    const res = await history(ana.token, legacy.id);
+    assert.strictEqual(res.status, 404);
 });
