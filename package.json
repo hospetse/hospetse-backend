@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test test/app.test.js test/cors.test.js test/health.test.js test/cpf.test.js test/profile-policy.test.js test/auth-guard.test.js test/contracts.test.js test/reservations-rules.test.js test/host-policy.test.js test/availability.test.js test/host-search-policy.test.js test/agenda-policy.test.js test/storage.test.js test/host-profile-policy.test.js test/cnpj.test.js test/admin-only.test.js test/provider-validations-policy.test.js test/seed-accounts-parity.test.js test/stripe-gateway.test.js test/admin-users-policy.test.js test/mask.test.js test/query.test.js test/contract-payment-policy.test.js",
-    "test:integration": "node --test test/integration/db.test.js test/integration/ready.test.js test/integration/tutor-profile.test.js test/integration/user-token.test.js test/integration/host-details.test.js test/integration/provisioning.test.js test/integration/pets.test.js test/integration/reservations.test.js test/integration/host-reservations.test.js test/integration/host-decisions.test.js test/integration/seed.test.js test/integration/host-search.test.js test/integration/agenda.test.js test/integration/host-profile.test.js test/integration/host-files.test.js test/integration/host-submission.test.js test/integration/admin-guard.test.js test/integration/admin-provider-validations.test.js test/integration/payment-intent.test.js test/integration/payment-webhook.test.js test/integration/admin-users.test.js test/integration/contract-payment.test.js test/integration/provider-model.test.js",
+    "test": "node --test test/app.test.js test/cors.test.js test/health.test.js test/cpf.test.js test/profile-policy.test.js test/auth-guard.test.js test/contracts.test.js test/reservations-rules.test.js test/host-policy.test.js test/availability.test.js test/host-search-policy.test.js test/agenda-policy.test.js test/storage.test.js test/host-profile-policy.test.js test/cnpj.test.js test/admin-only.test.js test/provider-validations-policy.test.js test/seed-accounts-parity.test.js test/stripe-gateway.test.js test/admin-users-policy.test.js test/mask.test.js test/query.test.js test/contract-payment-policy.test.js test/conversation-policy.test.js test/contract-status.test.js",
+    "test:integration": "node --test test/integration/db.test.js test/integration/ready.test.js test/integration/tutor-profile.test.js test/integration/user-token.test.js test/integration/host-details.test.js test/integration/provisioning.test.js test/integration/pets.test.js test/integration/reservations.test.js test/integration/host-reservations.test.js test/integration/host-decisions.test.js test/integration/seed.test.js test/integration/host-search.test.js test/integration/agenda.test.js test/integration/host-profile.test.js test/integration/host-files.test.js test/integration/host-submission.test.js test/integration/admin-guard.test.js test/integration/admin-provider-validations.test.js test/integration/payment-intent.test.js test/integration/payment-webhook.test.js test/integration/admin-users.test.js test/integration/contract-payment.test.js test/integration/conversation.test.js test/integration/my-contracts.test.js test/integration/chat-socket.test.js test/integration/provider-model.test.js",
     "smoke:db": "node test/smoke/smoke-db.js",
     "dev": "nodemon index.js",
     "start": "node index.js",
@@ -27,7 +27,8 @@
     "express": "^5.2.1",
     "jose": "6.2.12",
     "multer": "^2.5.0",
-    "stripe": "23.1.0"
+    "stripe": "23.1.0",
+    "ws": "8.23.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
