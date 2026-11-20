@@ -43,6 +43,8 @@ tags:
     description: Exigem conta ativa e perfil complete (#263). service-requests e checkout seguem provisórias até as tasks de reserva e checkout
   - name: Pagamento
     description: Integração com o Stripe em modo de teste (ADR-016)
+  - name: Conversa
+    description: Conversa entre Tutor e prestador, uma por contratação (#548). O envio e a entrega das mensagens em tempo real são pelo WebSocket em /ws (#551), descrito em docs/websocket.md
 
 paths:
   /health:
@@ -1467,6 +1469,116 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  # Conversa da contratação (#548): JWT do usuário → controller. Abrir conversa não é contratar (fora da guarda de contratação).
+  /api/v1/contracts/{id}/conversation:
+    post:
+      tags: [Conversa]
+      operationId: openContractConversation
+      summary: Abre ou reabre a conversa da contratação (#548)
+      description: |
+        Uma conversa por contratação, entre o Tutor que solicitou e o prestador do serviço, disponível desde a solicitação e em qualquer status.
+        A primeira abertura responde 201; as seguintes, 200 com o mesmo `id`. Tutor e Host abrindo ao mesmo tempo recebem a mesma conversa.
+        `open` é `false` quando a contratação está `completed`, `rejected` ou `cancelled`: o histórico continua visível, mas o envio (#551) é bloqueado.
+        Sem body. As mensagens são enviadas pelo canal em tempo real (#551).
+      security:
+        - userJwt: []
+      parameters:
+        - { name: id, in: path, required: true, description: Id da contratação (reservation), schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Conversa reaberta
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Conversation' }
+        '201':
+          description: Conversa criada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Conversation' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404':
+          description: |
+            `NOT_FOUND`: contratação inexistente, id inválido ou usuário que não participa dela (mesma resposta, sem nenhum dado).
+            [assunção] O card pedia 403 `CONVERSATION_FORBIDDEN`; a decisão foi 404, para não revelar que a contratação existe, como no pagamento (#530).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { code: NOT_FOUND, message: Contratação não encontrada }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/conversations/{id}/messages:
+    get:
+      tags: [Conversa]
+      operationId: listConversationMessages
+      summary: Histórico da conversa (#548)
+      description: |
+        Só para os participantes. A página 1 traz as mensagens mais recentes; dentro de cada página, da mais antiga para a mais nova
+        (`sentAt`, com desempate por `id`). Para carregar mensagens anteriores, peça a próxima página.
+      security:
+        - userJwt: []
+      parameters:
+        - { name: id, in: path, required: true, description: Id da conversa, schema: { type: string, format: uuid } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        '200':
+          description: Uma página do histórico
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, pageSize, total, open]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ConversationMessage' } }
+                  page: { type: integer }
+                  pageSize: { type: integer }
+                  total: { type: integer }
+                  open: { type: boolean, description: 'Se a conversa aceita mensagem nova' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404':
+          description: '`NOT_FOUND`: conversa inexistente, id inválido ou usuário que não participa dela (mesma resposta, sem nenhum dado)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { code: NOT_FOUND, message: Conversa não encontrada }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # Minhas contratações (#533): JWT do usuário → controller (só o Tutor, só as dele).
+  /api/v1/me/contracts:
+    get:
+      tags: [Contratação]
+      operationId: listMyContracts
+      summary: Lista as contratações do Tutor (#533)
+      description: |
+        Todas as contratações do Tutor autenticado (qualquer pet, prestador e status), da mais recente para a mais antiga
+        (data da solicitação, com desempate por `id`). O Tutor vem só do JWT. Filtros por status e período ficam fora da Sprint 8.
+        `type` vem do tipo do prestador: `hospedagem` (Host), `visita` (Pet Sitter) e `passeio` (Pet Walker).
+        `statusLabel` usa os nomes oficiais do Glossário (Estados da contratação). É a porta de entrada para pagar (#530),
+        acompanhar (#542) e conversar (#548).
+      security:
+        - userJwt: []
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        '200':
+          description: Uma página das contratações
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, pageSize, total]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/MyContract' } }
+                  page: { type: integer }
+                  pageSize: { type: integer }
+                  total: { type: integer }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotTutor' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /api/v1/service-requests:
     post:
       tags: [Contratação]
@@ -2042,6 +2154,49 @@ components:
         birthDate: { type: [string, 'null'], format: date }
         medicalNotes: { type: [string, 'null'] }
         behavioralNotes: { type: [string, 'null'] }
+    Conversation:
+      type: object
+      description: Conversa da contratação (#548)
+      required: [id, contractId, participants, open, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        contractId: { type: string, format: uuid }
+        participants:
+          type: object
+          properties:
+            tutor: { type: object, properties: { name: { type: string } } }
+            host: { type: object, properties: { name: { type: string } } }
+        open: { type: boolean, description: '`false` em contratação concluída, recusada ou cancelada: só leitura' }
+        createdAt: { type: string, format: date-time }
+    ConversationMessage:
+      type: object
+      required: [id, author, text, sentAt]
+      properties:
+        id: { type: string, format: uuid }
+        author:
+          type: object
+          properties:
+            role: { type: string, enum: [tutor, host] }
+            name: { type: [string, 'null'] }
+        text: { type: string }
+        sentAt: { type: string, format: date-time }
+    MyContract:
+      type: object
+      description: Uma contratação na lista do Tutor (#533)
+      required: [id, type, status, statusLabel, provider, pet, startDate, endDate, totalValue]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [hospedagem, visita, passeio] }
+        status: { type: string, enum: [requested, awaiting_payment, accepted, checked_in, checked_out, completed, rejected, cancelled] }
+        statusLabel:
+          type: string
+          description: 'Nome oficial do Glossário: Aguardando aceite, Aguardando pagamento, Confirmada, Em andamento, Concluída (checked_out e completed), Recusada ou Cancelada'
+          example: Aguardando pagamento
+        provider: { type: object, properties: { id: { type: string, format: uuid }, name: { type: string } } }
+        pet: { type: object, properties: { id: { type: string, format: uuid }, name: { type: string } } }
+        startDate: { type: string, format: date }
+        endDate: { type: [string, 'null'], format: date }
+        totalValue: { type: number, description: Valor total da contratação (snapshot da solicitação), example: 240.1 }
     ContractPayment:
       type: object
       description: Resultado da tentativa de pagamento (#530). Nunca traz dado do cartão
