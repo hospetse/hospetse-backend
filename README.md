@@ -679,6 +679,26 @@ A migration preenche o tipo de pessoa a partir do CPF/CNPJ existente, aceitando 
 - `[assunção]` (#339) Faixas de experiência: `lt_1`, `1_3` e `gt_3`. Confirmar os rótulos e limites antes de exigir o campo na submissão.
 - Área de atuação e disponibilidade (#561): o raio é armazenado; regras de cálculo e exposição na busca ainda precisam ser definidas.
 
+## Cadastro de Pet Sitter e Pet Walker: `/api/v1/me/provider` (#342)
+
+Contrato em `docs/openapi.yaml`. O usuário autenticado salva um rascunho com `PUT /api/v1/me/provider` (`providerType = pet_sitter` ou `pet_walker`; `name` é obrigatório em toda chamada). O primeiro PUT cria o `Provider` como `draft`; o tipo não muda depois. Campos omitidos preservam o valor salvo. `GET /api/v1/me/provider` retoma o cadastro sem expor o CPF/CNPJ completo ou as chaves privadas dos documentos. Uma conta pode continuar sendo Tutor.
+
+Os arquivos seguem o fluxo do Host: `POST /api/v1/me/provider/documents` recebe `type` e `file`; `POST /api/v1/me/provider/photos` recebe `file`; `GET /api/v1/me/provider/documents/{id}` dá link temporário só ao titular. PDF/JPEG/PNG até 10 MB e 5 documentos por tipo; JPEG/PNG/WebP até 5 MB e 10 fotos. `qualification` é opcional. O tipo do arquivo é conferido pelo conteúdo, e falha no banco após upload remove o objeto enviado.
+
+`POST /api/v1/me/provider/submit` não recebe body. Exige descrição, CPF/CNPJ coerente com PF/PJ, endereço, raio de atuação maior que zero, espécies e portes aceitos, resposta sobre administração de medicamentos, faixa de experiência, foto, identidade e comprovante de endereço; PJ também exige cartão CNPJ. Os campos faltantes voltam juntos em `details`, sem alterar o rascunho. O envio grava `pending`, `submittedAt` e a primeira foto como principal. Apenas prestadores aprovados podem aparecer nas buscas e receber solicitações; as rotas atuais de Host continuam limitadas a `hotel`.
+
+| Situação | Resposta |
+| --- | --- |
+| Rascunho salvo/consultado ou envio concluído | `200`, perfil do próprio usuário com documento mascarado |
+| Documento ou foto enviado | `201`, sem chave privada do armazenamento |
+| Campo inválido, arquivo inválido ou cadastro incompleto | `400 VALIDATION_ERROR`, com todos os `details` aplicáveis |
+| Sem JWT válido | `401 TOKEN_INVALID` |
+| Cadastro ou documento inexistente/de outro tipo ou usuário inexistente | `404 NOT_FOUND` / `USER_NOT_FOUND` |
+| Tipo alterado, cadastro já enviado, gravação concorrente ou limite de arquivos | `409` (`PROVIDER_TYPE_CONFLICT`, `PROVIDER_ALREADY_SUBMITTED`, `PROVIDER_DRAFT_CONFLICT` ou `FILE_LIMIT_REACHED`) |
+| Armazenamento indisponível | `503 STORAGE_UNAVAILABLE` |
+
+**Pendências:** `[assunção]` (#342) O caminho `/me/provider` segue o fluxo de rascunho do Host; o card sugeria `POST /providers`. Confirmação do nome com o mobile antes da integração. A lista e os limites da experiência dependem da #339; busca/área de atuação e disponibilidade ficam para #561. O pré-preenchimento dos documentos de PF a partir do Tutor depende do fluxo de documentos do Tutor definido na #339.
+
 ## Cadastro do Host: `/api/v1/me/host`
 
 Rotas usadas por quem quer ser Host (Task #325, HSP-PBI-008-TSK-05). Contrato completo em `docs/openapi.yaml`.
