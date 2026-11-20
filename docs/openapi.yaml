@@ -42,7 +42,7 @@ tags:
   - name: Pagamento
     description: Integração com o Stripe em modo de teste (ADR-016)
   - name: Conversa
-    description: Conversa entre Tutor e prestador, uma por contratação (#548)
+    description: Conversa entre Tutor e prestador, uma por contratação (#548). O envio e a entrega das mensagens em tempo real são pelo WebSocket em /ws (#551), descrito em docs/websocket.md
 
 paths:
   /health:

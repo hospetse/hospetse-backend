@@ -60,11 +60,7 @@ export async function openConversationService(user, reservationId) {
 
 // Histórico (#548). A página 1 traz as mensagens mais recentes, como num app de chat; dentro da página, da mais antiga para a mais nova.
 export async function listMessagesService(user, conversationId, { page, pageSize }) {
-    const conversation = UUID.test(conversationId)
-        ? await prisma.conversation.findUnique({ where: { id: conversationId }, select: { id: true, reservation: { select: PARTIES } } })
-        : null;
-    // Conversa sem contratação (legado) não tem participantes por esta regra: também 404
-    if (!conversation?.reservation || !participantRole(parties(conversation.reservation), user.id)) throw notFound('Conversa');
+    const { conversation } = await findOwnConversation(user, conversationId);
 
     const where = { conversationId: conversation.id };
     const [newestFirst, total] = await prisma.$transaction([
@@ -86,4 +82,56 @@ export async function listMessagesService(user, conversationId, { page, pageSize
         sentAt: message.sentAt,
     }));
     return { items, page, pageSize, total, open: isOpenForSending(conversation.reservation.status) };
+}
+
+const TEXT_MAX = 2000;
+
+// Conversa com os dois lados e o papel do usuário (histórico e canal em tempo real). Quem não participa, inexistente
+// ou conversa sem contratação (legado, sem participantes por esta regra): o mesmo 404
+async function findOwnConversation(user, conversationId) {
+    const conversation = UUID.test(conversationId ?? '')
+        ? await prisma.conversation.findUnique({ where: { id: conversationId }, select: { id: true, reservation: { select: PARTIES } } })
+        : null;
+    const role = conversation?.reservation ? participantRole(parties(conversation.reservation), user.id) : null;
+    if (!role) throw notFound('Conversa');
+    return { conversation, role };
+}
+
+// Entrar na sala da conversa (#551): só os participantes. Devolve se a conversa aceita mensagem nova.
+export async function joinConversationService(user, conversationId) {
+    const { conversation } = await findOwnConversation(user, conversationId);
+    return { conversationId: conversation.id, open: isOpenForSending(conversation.reservation.status) };
+}
+
+// Envio de mensagem (HSP-PBI-056-TSK-01 #551): só texto, só participante, só com a contratação aberta.
+// A mensagem é gravada antes de ser entregue: o que aparece em tempo real sempre existe no histórico.
+// O autor vem do túnel autenticado (user), nunca do conteúdo da mensagem.
+export async function sendMessageService(user, conversationId, text) {
+    if (typeof text !== 'string' || text.trim() === '' || text.trim().length > TEXT_MAX) {
+        throw new AppError('Parâmetros inválidos', 400, 'VALIDATION_ERROR', [{ field: 'text', message: `texto de 1 a ${TEXT_MAX} caracteres` }]);
+    }
+    const { conversation, role } = await findOwnConversation(user, conversationId);
+    // Conferido a cada envio: a contratação pode ter sido concluída ou cancelada depois de a pessoa entrar na sala
+    if (!isOpenForSending(conversation.reservation.status)) {
+        throw new AppError('A conversa desta contratação está encerrada', 409, 'CONVERSATION_CLOSED');
+    }
+
+    // Mensagem e evento de nova mensagem para o outro participante (HSP-PBI-064) na mesma transação: os dois existem ou nenhum
+    const { tutorUserId, hostUserId } = parties(conversation.reservation);
+    const message = await prisma.$transaction(async (tx) => {
+        const created = await tx.message.create({
+            data: { conversationId: conversation.id, senderType: role, senderUserId: user.id, content: text.trim() },
+            select: { id: true, sentAt: true, content: true },
+        });
+        await tx.notification.create({
+            data: {
+                userId: role === 'tutor' ? hostUserId : tutorUserId,
+                type: 'new_message',
+                // Só as referências (LGPD): o texto da mensagem fica na conversa, não na notificação
+                content: JSON.stringify({ conversationId: conversation.id, reservationId: conversation.reservation.id, messageId: created.id }),
+            },
+        });
+        return created;
+    });
+    return { id: message.id, author: { role, name: user.name }, text: message.content, sentAt: message.sentAt };
 }
