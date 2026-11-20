@@ -35,6 +35,8 @@ tags:
     description: Rotas do app, autenticadas pelo JWT do usuário
   - name: Host
     description: Consulta de Hosts pelo Tutor e rotas do próprio Host
+  - name: Provider
+    description: Cadastro de Pet Sitter e Pet Walker (#342)
   - name: Administração
     description: Exigem o papel Administrador (#313)
   - name: Contratação
@@ -924,6 +926,124 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  # Cadastro de Pet Sitter e Pet Walker (#342): mesmo fluxo de rascunho e arquivos do Host.
+  /api/v1/me/provider:
+    put:
+      tags: [Provider]
+      operationId: saveCareProviderDraft
+      summary: Salva o rascunho de Pet Sitter ou Pet Walker (#342)
+      description: A primeira chamada cria o rascunho; as seguintes atualizam. O tipo não pode mudar. O usuário vem somente do JWT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CareProviderDraftInput' }
+      responses:
+        '200':
+          description: Rascunho salvo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CareProviderProfile' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '409': { description: Cadastro já enviado, tipo diferente ou gravação concorrente }
+        '500': { $ref: '#/components/responses/InternalError' }
+    get:
+      tags: [Provider]
+      operationId: getCareProviderProfile
+      summary: Consulta o cadastro de Pet Sitter ou Pet Walker do usuário
+      responses:
+        '200':
+          description: Cadastro do usuário, com documento mascarado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CareProviderProfile' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404': { description: Cadastro inexistente ou usuário não encontrado }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/me/provider/submit:
+    post:
+      tags: [Provider]
+      operationId: submitCareProviderProfile
+      summary: Envia o rascunho para validação (#342)
+      description: |
+        Exige CPF/CNPJ correspondente ao tipo de pessoa, descrição, endereço, raio, espécies e portes aceitos, resposta sobre medicamentos,
+        faixa de experiência, ao menos uma foto, `identity` e `proof_of_address`; PJ exige `cnpj_card`.
+        Devolve todos os campos faltantes de uma vez, sem alterar o rascunho. Cadastro válido fica `pending` e fora das buscas.
+      responses:
+        '200':
+          description: Cadastro enviado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CareProviderProfile' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404': { description: Cadastro inexistente ou usuário não encontrado }
+        '409': { description: Cadastro já enviado }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/me/provider/documents:
+    post:
+      tags: [Provider]
+      operationId: addCareProviderDocument
+      summary: Envia documento ao rascunho do prestador
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [type, file]
+              properties:
+                type: { type: string, enum: [identity, proof_of_address, cnpj_card, qualification] }
+                file: { type: string, format: binary }
+      responses:
+        '201': { description: Documento guardado; chave privada não é exposta }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404': { description: Cadastro inexistente ou usuário não encontrado }
+        '409': { description: '`PROVIDER_ALREADY_SUBMITTED` ou `FILE_LIMIT_REACHED`' }
+        '503': { $ref: '#/components/responses/StorageUnavailable' }
+
+  /api/v1/me/provider/documents/{id}:
+    get:
+      tags: [Provider]
+      operationId: getCareProviderDocumentLink
+      summary: Link temporário do próprio documento
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Link temporário para o titular }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404': { description: Documento inexistente ou de outro usuário }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/me/provider/photos:
+    post:
+      tags: [Provider]
+      operationId: addCareProviderPhoto
+      summary: Envia foto ao rascunho do prestador
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201': { description: Foto guardada; até 10 fotos }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404': { description: Cadastro inexistente ou usuário não encontrado }
+        '409': { description: '`PROVIDER_ALREADY_SUBMITTED` ou `FILE_LIMIT_REACHED`' }
+        '503': { $ref: '#/components/responses/StorageUnavailable' }
+
   # Cadastro do Host (#325): JWT do usuário → (JSON no PUT) → controller. O dono vem só do JWT.
   /api/v1/me/host:
     put:
@@ -1556,6 +1676,46 @@ components:
         city: { type: string, minLength: 1, maxLength: 100 }
         state: { type: string, pattern: '^[A-Za-z]{2}$', example: SP }
 
+    CareProviderDraftInput:
+      type: object
+      additionalProperties: false
+      required: [providerType, name]
+      properties:
+        providerType: { type: string, enum: [pet_sitter, pet_walker] }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        personType: { type: string, enum: [pf, pj] }
+        cpfCnpj: { type: [string, 'null'], description: CPF ou CNPJ válido, único e coerente com personType }
+        address: { $ref: '#/components/schemas/HostAddress' }
+        kilometerRadius: { type: number, exclusiveMinimum: 0, maximum: 9999.99, multipleOf: 0.01 }
+        administersMedication: { type: boolean }
+        experienceRange: { type: string, enum: [lt_1, '1_3', gt_3] }
+        acceptedSpecies: { type: array, items: { type: string, enum: [dog, cat] } }
+        acceptedSizes: { type: array, items: { type: string, enum: [small, medium, large] } }
+        acceptedBreeds: { type: array, items: { type: string, minLength: 1, maxLength: 100 } }
+
+    CareProviderProfile:
+      type: object
+      required: [id, providerType, validationStatus, name, personType, description, cpfCnpjMasked, address, kilometerRadius, administersMedication, experienceRange, acceptedSpecies, acceptedSizes, acceptedBreeds, documents, photos]
+      properties:
+        id: { type: string, format: uuid }
+        providerType: { type: string, enum: [pet_sitter, pet_walker] }
+        validationStatus: { type: string, enum: [draft, pending, approved, rejected] }
+        rejectionReason: { type: [string, 'null'] }
+        name: { type: string }
+        personType: { type: [string, 'null'], enum: [pf, pj, null] }
+        description: { type: [string, 'null'] }
+        cpfCnpjMasked: { type: [string, 'null'] }
+        address: { oneOf: [{ $ref: '#/components/schemas/HostAddress' }, { type: 'null' }] }
+        kilometerRadius: { type: [number, 'null'] }
+        administersMedication: { type: [boolean, 'null'] }
+        experienceRange: { type: [string, 'null'] }
+        acceptedSpecies: { type: array, items: { type: string } }
+        acceptedSizes: { type: array, items: { type: string } }
+        acceptedBreeds: { type: array, items: { type: string } }
+        documents: { type: array, items: { $ref: '#/components/schemas/HostDocument' } }
+        photos: { type: array, items: { $ref: '#/components/schemas/HostPhoto' } }
+
     HostDraftInput:
       type: object
       additionalProperties: false
@@ -1576,7 +1736,7 @@ components:
       required: [id, type]
       properties:
         id: { type: string, format: uuid }
-        type: { type: string, enum: [identity, proof_of_address, cnpj_card] }
+        type: { type: string, enum: [identity, proof_of_address, cnpj_card, qualification] }
 
     HostPhoto:
       type: object
