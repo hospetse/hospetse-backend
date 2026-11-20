@@ -15,8 +15,8 @@ import {
 import { getUserController, listUsersController } from './admin/users.controller.js';
 import { tutorProfileController } from './tutors/tutor-profile.controller.js';
 import { hostDetailsController } from './hosts/host-details.controller.js';
-import { getHostProfileController, saveHostDraftController, submitHostProfileController } from './hosts/host-profile.controller.js';
-import { addHostDocumentController, addHostPhotoController, hostDocumentLinkController } from './hosts/host-files.controller.js';
+import { getCareProfileController, getHostProfileController, saveCareDraftController, saveHostDraftController, submitCareProfileController, submitHostProfileController } from './hosts/host-profile.controller.js';
+import { addCareDocumentController, addCarePhotoController, addHostDocumentController, addHostPhotoController, careDocumentLinkController, hostDocumentLinkController } from './hosts/host-files.controller.js';
 import { uploadFile } from './middlewares/upload-file.js';
 import { searchHostsController } from './hosts/host-search.controller.js';
 import { blockPeriodController, getAgendaController, unblockDayController } from './hosts/agenda.controller.js';
@@ -140,6 +140,13 @@ app.post('/api/v1/me/host/reservations/:id/accept', acceptHostReservationControl
 app.post('/api/v1/me/host/reservations/:id/reject', express.json(), rejectHostReservationController);
 
 // Cadastro do Host (HSP-PBI-008-TSK-05 #325). Ordem: JWT do usuário → (JSON no PUT) → controller. O dono vem só do JWT.
+app.put('/api/v1/me/provider', express.json(), saveCareDraftController);
+app.get('/api/v1/me/provider', getCareProfileController);
+app.post('/api/v1/me/provider/submit', express.json(), submitCareProfileController);
+app.post('/api/v1/me/provider/documents', uploadFile('document'), addCareDocumentController);
+app.post('/api/v1/me/provider/photos', uploadFile('photo'), addCarePhotoController);
+app.get('/api/v1/me/provider/documents/:id', careDocumentLinkController);
+
 app.put('/api/v1/me/host', express.json(), saveHostDraftController);
 app.get('/api/v1/me/host', getHostProfileController);
 app.post('/api/v1/me/host/submit', submitHostProfileController);

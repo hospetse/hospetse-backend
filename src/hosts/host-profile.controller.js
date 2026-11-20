@@ -1,8 +1,8 @@
 import { AppError } from '../lib/app-error.js';
 import { maskDocument } from '../lib/mask.js';
 import { publicFileUrl } from '../lib/storage.js';
-import { parseHostDraft } from './host-profile-policy.js';
-import { findHostProfileService, isCpfCnpjTaken, saveHostDraftService, submitHostProfileService } from './host-profile.service.js';
+import { parseCareDraft, parseHostDraft } from './host-profile-policy.js';
+import { findCareProfileService, findHostProfileService, isCpfCnpjTaken, saveCareDraftService, saveHostDraftService, submitCareProfileService, submitHostProfileService } from './host-profile.service.js';
 
 function sendError(res, error) {
     if (error instanceof AppError) {
@@ -13,7 +13,7 @@ function sendError(res, error) {
 }
 
 // Só o titular vê o próprio endereço. CPF ou CNPJ volta mascarado (LGPD); a chave dos documentos nunca sai.
-async function toResponse(provider) {
+async function toResponse(provider, care = false) {
     const { address } = provider;
     return {
         id: provider.id,
@@ -33,7 +33,12 @@ async function toResponse(provider) {
             city: address.city,
             state: address.state,
         },
-        capacity: provider.hotelDetail?.capacity ?? null,
+        ...(care ? {
+            personType: provider.personType,
+            administersMedication: provider.administersMedication,
+            experienceRange: provider.experienceRange,
+            kilometerRadius: Number(provider.petSitterDetail?.kilometerRadius ?? provider.petWalkerDetail?.kilometerRadius) || null,
+        } : { capacity: provider.hotelDetail?.capacity ?? null }),
         acceptedSpecies: provider.acceptedSpecies,
         acceptedSizes: provider.acceptedSizes,
         acceptedBreeds: provider.acceptedBreeds,
@@ -43,9 +48,9 @@ async function toResponse(provider) {
 }
 
 // PUT /api/v1/me/host (HSP-PBI-008-TSK-05 #325): salva o rascunho. O Host vem só do JWT.
-export async function saveHostDraftController(req, res) {
+async function saveDraftController(req, res, parse, save, care) {
     try {
-        const { details, data, validCpfCnpj } = parseHostDraft(req.body);
+        const { details, data, validCpfCnpj } = parse(req.body);
         // Só consulta o banco se o documento é válido; o duplicado sai junto com os outros erros
         if (validCpfCnpj && await isCpfCnpjTaken(validCpfCnpj, req.user.id)) {
             details.push({ field: 'cpfCnpj', message: 'CPF ou CNPJ já cadastrado' });
@@ -53,26 +58,36 @@ export async function saveHostDraftController(req, res) {
         if (details.length) {
             return res.status(400).json({ code: 'VALIDATION_ERROR', message: 'Payload inválido', details });
         }
-        return res.status(200).json(await toResponse(await saveHostDraftService(req.user, data)));
+        return res.status(200).json(await toResponse(await save(req.user, data), care));
     } catch (error) {
         return sendError(res, error);
     }
 }
+export const saveHostDraftController = (req, res) => saveDraftController(req, res, parseHostDraft, saveHostDraftService, false);
+export const saveCareDraftController = (req, res) => saveDraftController(req, res, parseCareDraft, saveCareDraftService, true);
 
 // GET /api/v1/me/host (#325): o app retoma o cadastro de onde parou e vê a situação da validação.
-export async function getHostProfileController(req, res) {
+async function getProfileController(req, res, find, care) {
     try {
-        return res.status(200).json(await toResponse(await findHostProfileService(req.user)));
+        return res.status(200).json(await toResponse(await find(req.user), care));
     } catch (error) {
         return sendError(res, error);
     }
 }
+export const getHostProfileController = (req, res) => getProfileController(req, res, findHostProfileService, false);
+export const getCareProfileController = (req, res) => getProfileController(req, res, findCareProfileService, true);
 
 // POST /api/v1/me/host/submit (#325): envia o rascunho para validação, sem body.
-export async function submitHostProfileController(req, res) {
+async function submitProfileController(req, res, submit, care) {
     try {
-        return res.status(200).json(await toResponse(await submitHostProfileService(req.user)));
+        return res.status(200).json(await toResponse(await submit(req.user), care));
     } catch (error) {
         return sendError(res, error);
     }
 }
+export const submitHostProfileController = (req, res) => submitProfileController(req, res, submitHostProfileService, false);
+export const submitCareProfileController = (req, res) => {
+    const fields = Object.keys(req.body ?? {});
+    if (fields.length) return res.status(400).json({ code: 'VALIDATION_ERROR', message: 'Payload inválido', details: fields.map((field) => ({ field, message: 'não faz parte do contrato' })) });
+    return submitProfileController(req, res, submitCareProfileService, true);
+};

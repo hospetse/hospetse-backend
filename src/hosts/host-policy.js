@@ -7,7 +7,7 @@ export const ELIGIBLE_HOST = { providerType: 'hotel', status: 'active', validati
 // Papel de Host (#485): o USER tem linha em providers. Vale para qualquer situação do Host, para ele seguir vendo o que já recebeu.
 // Rascunho (#325) ainda não é Host: o cadastro nem foi enviado.
 export function requireHost(user) {
-    if (!user.provider || user.provider.validationStatus === 'draft') {
+    if (user.provider?.providerType !== 'hotel' || user.provider.validationStatus === 'draft') {
         throw new AppError('Apenas Hosts acessam as solicitações recebidas.', 403, 'HOST_REQUIRED');
     }
     return user.provider;

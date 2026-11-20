@@ -3,11 +3,12 @@ import { isValidCnpj } from '../lib/cnpj.js';
 import { isValidCpf } from '../lib/cpf.js';
 import { PET_SIZES, PET_SPECIES } from '../pets/pet-policy.js';
 
-// shortcut: só hospedagem, único tipo que a busca mostra; abrir para pet_sitter e pet_walker quando houver fluxo deles.
 export const HOST_TYPES = ['hotel'];
+export const CARE_TYPES = ['pet_sitter', 'pet_walker'];
 
 // Mesmos valores do CHECK de provider_documents.type (#323)
 export const DOCUMENT_TYPES = ['identity', 'proof_of_address', 'cnpj_card'];
+export const CARE_DOCUMENT_TYPES = [...DOCUMENT_TYPES, 'qualification'];
 export const MAX_DOCUMENTS_PER_TYPE = 5;
 export const MAX_PHOTOS = 10;
 // [assunção] teto só para barrar valor absurdo; o card não define
@@ -23,13 +24,14 @@ function listProblem(field, value, allowed, invalid) {
 }
 
 // Valida o PUT do rascunho e devolve os dados no formato gravado. Campo omitido fica como está; só name e providerType são sempre exigidos.
-export function parseHostDraft(body) {
-    const { providerType, name, description, cpfCnpj, address, capacity, acceptedSpecies, acceptedSizes, acceptedBreeds, ...extra } = body ?? {};
+function parseDraft(body, allowedTypes) {
+    const { providerType, name, description, cpfCnpj, address, capacity, personType, administersMedication, experienceRange, kilometerRadius, acceptedSpecies, acceptedSizes, acceptedBreeds, ...extra } = body ?? {};
+    const care = allowedTypes === CARE_TYPES;
 
     const details = [];
     const invalid = (field, message) => details.push({ field, message });
 
-    if (!HOST_TYPES.includes(providerType)) invalid('providerType', `um de: ${HOST_TYPES.join(', ')}`);
+    if (!allowedTypes.includes(providerType)) invalid('providerType', `um de: ${allowedTypes.join(', ')}`);
     if (!isText(name, 255)) invalid('name', 'obrigatório, até 255 caracteres');
     if (description != null && !isText(description, 2000)) invalid('description', 'até 2000 caracteres');
 
@@ -43,8 +45,20 @@ export function parseHostDraft(body) {
         else invalid('address', 'deve ter todos os campos do endereço');
     }
 
-    if (capacity !== undefined && (!Number.isInteger(capacity) || capacity < 1 || capacity > MAX_CAPACITY)) {
+    if (!care && capacity !== undefined && (!Number.isInteger(capacity) || capacity < 1 || capacity > MAX_CAPACITY)) {
         invalid('capacity', `inteiro de 1 a ${MAX_CAPACITY}`);
+    }
+    if (care) {
+        if (capacity !== undefined) invalid('capacity', 'não faz parte do contrato');
+        if (personType !== undefined && !['pf', 'pj'].includes(personType)) invalid('personType', 'um de: pf, pj');
+        if (personType && cpfCnpjIsValid && (personType === 'pf') !== (cleanCpfCnpj.length === 11)) invalid('cpfCnpj', 'incompatível com personType');
+        if (administersMedication !== undefined && typeof administersMedication !== 'boolean') invalid('administersMedication', 'deve ser booleano');
+        if (experienceRange !== undefined && !['lt_1', '1_3', 'gt_3'].includes(experienceRange)) invalid('experienceRange', 'um de: lt_1, 1_3, gt_3');
+        if (kilometerRadius !== undefined && (typeof kilometerRadius !== 'number' || !Number.isFinite(kilometerRadius) || kilometerRadius <= 0 || kilometerRadius > 9999.99 || !/^\d+(\.\d{1,2})?$/.test(String(kilometerRadius)))) invalid('kilometerRadius', 'número maior que 0, até 9999,99, com até 2 casas decimais');
+    } else {
+        for (const field of ['personType', 'administersMedication', 'experienceRange', 'kilometerRadius']) {
+            if ({ personType, administersMedication, experienceRange, kilometerRadius }[field] !== undefined) invalid(field, 'não faz parte do contrato');
+        }
     }
 
     if (acceptedSpecies !== undefined) listProblem('acceptedSpecies', acceptedSpecies, (item) => PET_SPECIES.includes(item), invalid);
@@ -65,6 +79,10 @@ export function parseHostDraft(body) {
             description: description === undefined ? undefined : description?.trim() ?? null,
             cpfCnpj: cleanCpfCnpj,
             capacity,
+            personType: care ? personType : undefined,
+            administersMedication: care ? administersMedication : undefined,
+            experienceRange: care ? experienceRange : undefined,
+            kilometerRadius: care ? kilometerRadius : undefined,
             acceptedSpecies,
             acceptedSizes,
             acceptedBreeds: acceptedBreeds?.map((breed) => breed.trim()),
@@ -72,6 +90,9 @@ export function parseHostDraft(body) {
         },
     };
 }
+
+export const parseHostDraft = (body) => parseDraft(body, HOST_TYPES);
+export const parseCareDraft = (body) => parseDraft(body, CARE_TYPES);
 
 // O que falta para o rascunho ir à validação. provider vem com address, hotelDetail, documents e photos.
 export function submissionProblems(provider) {
@@ -85,7 +106,15 @@ export function submissionProblems(provider) {
     if (!provider.description) invalid('description', 'obrigatório');
     if (!provider.cpfCnpj) invalid('cpfCnpj', 'obrigatório');
     if (!provider.address) invalid('address', 'obrigatório');
-    if (!provider.hotelDetail?.capacity) invalid('capacity', 'obrigatório');
+    if (!CARE_TYPES.includes(provider.providerType) && !provider.hotelDetail?.capacity) invalid('capacity', 'obrigatório');
+    if (CARE_TYPES.includes(provider.providerType)) {
+        if (!provider.personType) invalid('personType', 'obrigatório');
+        if (provider.personType && provider.cpfCnpj && (provider.personType === 'pf') !== (provider.cpfCnpj.length === 11)) invalid('cpfCnpj', 'incompatível com personType');
+        if (provider.administersMedication === null) invalid('administersMedication', 'obrigatório');
+        if (!provider.experienceRange) invalid('experienceRange', 'obrigatório');
+        const radius = provider.providerType === 'pet_sitter' ? provider.petSitterDetail?.kilometerRadius : provider.petWalkerDetail?.kilometerRadius;
+        if (!radius || Number(radius) <= 0) invalid('kilometerRadius', 'obrigatório');
+    }
     if (!provider.acceptedSpecies.length) invalid('acceptedSpecies', 'escolha ao menos uma espécie');
     if (!provider.acceptedSizes.length) invalid('acceptedSizes', 'escolha ao menos um porte');
     if (!provider.photos.length) invalid('photos', 'envie ao menos uma foto');
