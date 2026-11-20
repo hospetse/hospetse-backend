@@ -3,3 +3,4 @@ node_modules/
 .mcp.json
 .DS_Store
 .agents
+prisma/load/output/
