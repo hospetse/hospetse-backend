@@ -75,6 +75,7 @@ model Provider {
   id                    String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId                String                 @unique @map("user_id") @db.Uuid
   providerType          String                 @map("provider_type") @db.VarChar(30)
+  personType            String?                @map("person_type") @db.VarChar(2)
   name                  String                 @db.VarChar(255)
   cpfCnpj               String?                @unique @map("cpf_cnpj") @db.VarChar(18)
   addressId             String?                @unique @map("address_id") @db.Uuid
@@ -85,6 +86,8 @@ model Provider {
   // draft (rascunho, #325), pending, approved ou rejected (#323): só approved aparece nas consultas públicas
   validationStatus      String                 @default("pending") @map("validation_status") @db.VarChar(20)
   description           String?                @db.VarChar(2000)
+  administersMedication Boolean?               @map("administers_medication")
+  experienceRange       String?                @map("experience_range") @db.VarChar(10)
   // Quando o cadastro foi enviado para validação (#398): ordena a fila do Administrador. updatedAt não serve, muda a cada edição
   submittedAt           DateTime?              @map("submitted_at") @db.Timestamptz(3)
   // Decisão do Administrador (#404): quem decidiu, quando e o motivo da reprovação, gravados juntos com o validation_status
@@ -154,7 +157,7 @@ model ProviderPhoto {
   @@map("provider_photos")
 }
 
-// Documentos do Host para validação (#323). type: identity, proof_of_address ou cnpj_card (CHECK na migration)
+// Documentos do prestador para validação (#323, #341). qualification é opcional; tipos no CHECK da migration.
 model ProviderDocument {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   providerId String   @map("provider_id") @db.Uuid
@@ -188,10 +191,11 @@ model PetSitterDetail {
 }
 
 model PetWalkerDetail {
-  providerId   String   @id @map("provider_id") @db.Uuid
-  durationWalk Int?     @map("duration_walk")
-  provider     Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
-  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  providerId      String   @id @map("provider_id") @db.Uuid
+  durationWalk    Int?     @map("duration_walk")
+  kilometerRadius Decimal? @map("kilometer_radius") @db.Decimal(6, 2)
+  provider        Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("pet_walker_details")
 }
