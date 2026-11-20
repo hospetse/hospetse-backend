@@ -67,7 +67,7 @@ test('escrita violando CHECK é rejeitada e não deixa resíduo', async () => {
         prisma.$transaction(async (tx) => tx.coupon.create({
             data: { code, discountType: 'fixed', discountValue: -1, active: false },
         })),
-        (err) => /check constraint/i.test(err.message),
+        (err) => /23514/.test(err.message), // SQLSTATE da violação de CHECK, independente do idioma do PostgreSQL
         'esperava violação de CHECK',
     );
     const residuo = await prisma.coupon.findUnique({ where: { code } });

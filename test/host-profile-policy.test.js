@@ -1,7 +1,7 @@
 // Regras do cadastro do Host (#325), sem HTTP nem banco.
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { parseHostDraft, submissionProblems } from '../src/hosts/host-profile-policy.js';
+import { parseCareDraft, parseHostDraft, submissionProblems } from '../src/hosts/host-profile-policy.js';
 
 const CPF = '52998224725';
 const CNPJ = '11222333000181';
@@ -110,4 +110,25 @@ test('CNPJ também exige o cartão CNPJ', () => {
 
 test('CPF não exige o cartão CNPJ', () => {
     assert.ok(!fields(submissionProblems(completeProvider())).includes('documents.cnpj_card'));
+});
+
+test('rascunho de Pet Sitter acumula os erros sem aceitar capacidade ou identidade do cliente', () => {
+    const { details } = parseCareDraft({
+        providerType: 'pet_sitter', name: 'Cuidadora', personType: 'pj', cpfCnpj: CPF,
+        administersMedication: 'sim', experienceRange: 'dez', kilometerRadius: -1,
+        capacity: 2, userId: 'outro',
+    });
+    assert.deepStrictEqual(fields(details), ['capacity', 'cpfCnpj', 'administersMedication', 'experienceRange', 'kilometerRadius', 'userId']);
+});
+
+test('Pet Sitter e Pet Walker exigem os campos comuns e o raio antes da submissão', () => {
+    for (const providerType of ['pet_sitter', 'pet_walker']) {
+        const provider = completeProvider({ providerType, personType: null, administersMedication: null, experienceRange: null });
+        assert.deepStrictEqual(fields(submissionProblems(provider)), ['personType', 'administersMedication', 'experienceRange', 'kilometerRadius']);
+        provider.personType = 'pf';
+        provider.administersMedication = false;
+        provider.experienceRange = '1_3';
+        provider[providerType === 'pet_sitter' ? 'petSitterDetail' : 'petWalkerDetail'] = { kilometerRadius: 5 };
+        assert.deepStrictEqual(submissionProblems(provider), []);
+    }
 });

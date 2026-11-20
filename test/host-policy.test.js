@@ -12,6 +12,12 @@ test('requireHost: rascunho ainda não é Host', () => {
 });
 
 test('requireHost: USER com provider recebe o Host de volta, mesmo sendo também Tutor', () => {
-    const provider = { id: 'p1' };
+    const provider = { id: 'p1', providerType: 'hotel' };
     assert.strictEqual(requireHost({ provider, tutor: { id: 't1' } }), provider);
+});
+
+test('requireHost: Pet Sitter e Pet Walker não acessam rotas do Host', () => {
+    for (const providerType of ['pet_sitter', 'pet_walker']) {
+        assert.throws(() => requireHost({ provider: { id: 'p1', providerType, validationStatus: 'pending' } }), { statusCode: 403, code: 'HOST_REQUIRED' });
+    }
 });
