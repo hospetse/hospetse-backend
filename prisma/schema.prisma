@@ -40,6 +40,7 @@ model User {
   decidedValidations Provider[]     @relation("ProviderValidationDecidedBy")
   notifications      Notification[]
   penalties          Penalty[]      @relation("PenalizedUser")
+  sentMessages       Message[]
   appliedPenalties   Penalty[]      @relation("PenaltyAppliedBy")
   updatedAt          DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -468,7 +469,8 @@ model Conversation {
   id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tutorId       String       @map("tutor_id") @db.Uuid
   providerId    String       @map("provider_id") @db.Uuid
-  reservationId String?      @map("reservation_id") @db.Uuid
+  // Uma conversa por contratação (#548). Conversa sem contratação (legado do assistente de IA) continua aceita
+  reservationId String?      @unique @map("reservation_id") @db.Uuid
   status        String       @default("ai_handling") @db.VarChar(20)
   escalatedAt   DateTime?    @map("escalated_at") @db.Timestamptz(3)
   createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -480,7 +482,6 @@ model Conversation {
 
   @@index([tutorId])
   @@index([providerId])
-  @@index([reservationId])
   @@index([status, escalatedAt])
   @@map("conversations")
 }
@@ -489,11 +490,16 @@ model Message {
   id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   conversationId String       @map("conversation_id") @db.Uuid
   senderType     SenderType   @map("sender_type")
+  // Quem enviou (#548). senderType diz o papel; mensagens antigas não têm
+  senderUserId   String?      @map("sender_user_id") @db.Uuid
   content        String
   sentAt         DateTime     @default(now()) @map("sent_at") @db.Timestamptz(3)
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User?        @relation(fields: [senderUserId], references: [id])
 
   @@index([conversationId, sentAt])
+  @@index([conversationId, sentAt, id])
+  @@index([senderUserId])
   @@map("messages")
 }
 
