@@ -934,7 +934,10 @@ paths:
       tags: [Provider]
       operationId: saveCareProviderDraft
       summary: Salva o rascunho de Pet Sitter ou Pet Walker (#342)
-      description: A primeira chamada cria o rascunho; as seguintes atualizam. O tipo não pode mudar. O usuário vem somente do JWT.
+      description: |
+        Salva dados parciais do cadastro do usuário identificado pelo JWT; não envia o perfil para análise.
+        A primeira chamada cria o rascunho (`draft`) e as seguintes atualizam o mesmo registro, preservando campos omitidos.
+        O tipo não pode mudar. Aceita somente Pet Sitter e Pet Walker; Host usa `/api/v1/me/host`.
       requestBody:
         required: true
         content:
@@ -971,6 +974,8 @@ paths:
       operationId: submitCareProviderProfile
       summary: Envia o rascunho para validação (#342)
       description: |
+        Depois dos PUTs e uploads, o app chama esta rota quando o usuário confirma o envio. Não recebe body,
+        não cria outro prestador e usa os dados já salvos no rascunho do usuário autenticado.
         Exige CPF/CNPJ correspondente ao tipo de pessoa, descrição, endereço, raio, espécies e portes aceitos, resposta sobre medicamentos,
         faixa de experiência, ao menos uma foto, `identity` e `proof_of_address`; PJ exige `cnpj_card`.
         Devolve todos os campos faltantes de uma vez, sem alterar o rascunho. Cadastro válido fica `pending` e fora das buscas.
