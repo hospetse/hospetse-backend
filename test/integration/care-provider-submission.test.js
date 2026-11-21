@@ -24,6 +24,8 @@ const userIds = [];
 after(async () => {
     server.close();
     const providers = await prisma.provider.findMany({ where: { userId: { in: userIds } }, select: { addressId: true } });
+    await prisma.pet.deleteMany({ where: { tutor: { userId: { in: userIds } } } });
+    await prisma.service.deleteMany({ where: { provider: { userId: { in: userIds } } } });
     await prisma.provider.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.tutor.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.address.deleteMany({ where: { id: { in: providers.map((provider) => provider.addressId).filter(Boolean) } } });
@@ -70,7 +72,7 @@ function draft(providerType) {
     return {
         providerType, name: 'Cuidados de teste', personType: 'pf', cpfCnpj: cpf(),
         description: 'Cuidados em domicílio', administersMedication: false, experienceRange: '1_3', kilometerRadius: 5,
-        address: { zipCode: '01001000', street: 'Rua Teste', number: '1', neighborhood: 'Centro', city: 'São Paulo', state: 'SP' },
+        address: { zipCode: '01001000', street: 'Rua Teste', number: '1', neighborhood: 'Centro', city: `it-care-${randomUUID()}`, state: 'SP' },
         acceptedSpecies: ['dog'], acceptedSizes: ['small'],
     };
 }
@@ -85,6 +87,14 @@ for (const providerType of ['pet_sitter', 'pet_walker']) {
         assert.equal(created.data.validationStatus, 'draft');
         assert.equal(created.data.cpfCnpjMasked, `***${body.cpfCnpj.slice(-4)}`);
         assert.ok(!JSON.stringify(created.data).includes(body.cpfCnpj));
+        const updated = await api('PUT', '/api/v1/me/provider', headers, { providerType, name: 'Novo nome', kilometerRadius: 7 });
+        assert.equal(updated.status, 200);
+        assert.equal(updated.data.id, created.data.id);
+        assert.equal(updated.data.description, body.description);
+        assert.equal(updated.data.address.city, body.address.city);
+        assert.equal(updated.data.kilometerRadius, 7);
+        assert.equal((await api('GET', '/api/v1/me/provider', headers)).data.name, 'Novo nome');
+        assert.equal(await prisma.provider.count({ where: { userId: saved.id } }), 1);
         const document = await api('POST', '/api/v1/me/provider/documents', headers, form(PDF, { type: 'identity' }));
         assert.equal(document.status, 201);
         assert.equal((await api('POST', '/api/v1/me/provider/documents', headers, form(PDF, { type: 'proof_of_address' }))).status, 201);
@@ -104,15 +114,58 @@ for (const providerType of ['pet_sitter', 'pet_walker']) {
         assert.equal(provider.validationStatus, 'pending');
         assert.equal(provider.userId, tutor.userId);
         assert.ok(provider.submittedAt.getTime() >= before);
-        assert.equal(Number(provider[providerType === 'pet_sitter' ? 'petSitterDetail' : 'petWalkerDetail'].kilometerRadius), 5);
+        assert.equal(Number(provider[providerType === 'pet_sitter' ? 'petSitterDetail' : 'petWalkerDetail'].kilometerRadius), 7);
         assert.equal(provider.urlPicture, provider.photos[0].url);
         assert.deepEqual(provider.documents.map((item) => item.type).sort(), ['identity', 'proof_of_address', 'qualification']);
+        const service = await prisma.service.create({ data: { providerId: provider.id, name: 'Cuidado', price: 100 } });
+        const search = await api('GET', `/api/v1/hosts/search?city=${encodeURIComponent(body.address.city)}`, headers);
+        assert.equal(search.status, 200);
+        assert.equal(search.data.total, 0);
+        assert.equal((await api('GET', `/api/v1/hosts/${provider.id}`, headers)).status, 404);
+        await prisma.user.update({ where: { id: saved.id }, data: { profileStatus: 'complete' } });
+        const pet = await prisma.pet.create({ data: { tutorId: tutor.id, petName: 'Rex', petSpecies: 'dog', petSize: 'small' } });
+        const reservation = await api('POST', '/api/v1/reservations', { ...headers, 'Idempotency-Key': randomUUID() }, {
+            serviceId: service.id, petId: pet.id, startDate: '2030-01-10', endDate: '2030-01-12',
+        });
+        assert.equal(reservation.status, 400);
+        assert.deepEqual(fields(reservation), ['serviceId']);
+        assert.equal(await prisma.reservation.count({ where: { serviceId: service.id } }), 0);
         assert.equal((await api('GET', '/api/v1/me/host', headers)).status, 404);
         assert.equal((await api('GET', '/api/v1/me/host/reservations', headers)).status, 403);
         assert.equal((await api('PUT', '/api/v1/me/provider', headers, body)).status, 409);
         assert.equal((await api('POST', '/api/v1/me/provider/submit', headers)).status, 409);
+        assert.equal((await api('POST', '/api/v1/me/provider/documents', headers, form(PDF, { type: 'identity' }))).status, 409);
+        assert.equal((await api('POST', '/api/v1/me/provider/photos', headers, form(JPEG))).status, 409);
     });
 }
+
+test('rotas de prestador exigem JWT e rascunho do titular', async () => {
+    const { headers } = await user();
+    for (const path of ['/api/v1/me/provider', '/api/v1/me/provider/documents/' + randomUUID()]) {
+        assert.equal((await api('GET', path)).status, 401);
+        assert.equal((await api('GET', path, headers)).status, 404);
+    }
+    assert.equal((await api('POST', '/api/v1/me/provider/submit')).status, 401);
+    assert.equal((await api('POST', '/api/v1/me/provider/submit', headers)).status, 404);
+    assert.equal((await api('POST', '/api/v1/me/provider/photos', headers, form(JPEG))).status, 404);
+});
+
+test('anexos inválidos não são gravados no rascunho', async () => {
+    const { saved, headers } = await user();
+    assert.equal((await api('PUT', '/api/v1/me/provider', headers, { providerType: 'pet_sitter', name: 'Rascunho' })).status, 200);
+    const invalidDocument = await api('POST', '/api/v1/me/provider/documents', headers, form(PDF, { type: 'contrato' }));
+    assert.equal(invalidDocument.status, 400);
+    assert.deepEqual(fields(invalidDocument), ['type']);
+    const invalidPhoto = await api('POST', '/api/v1/me/provider/photos', headers, form(PDF));
+    assert.equal(invalidPhoto.status, 400);
+    assert.deepEqual(fields(invalidPhoto), ['file']);
+    const extraPhoto = await api('POST', '/api/v1/me/provider/photos', headers, form(JPEG, { userId: randomUUID() }));
+    assert.equal(extraPhoto.status, 400);
+    assert.deepEqual(fields(extraPhoto), ['userId']);
+    const provider = await prisma.provider.findUnique({ where: { userId: saved.id }, include: { documents: true, photos: true } });
+    assert.equal(provider.documents.length, 0);
+    assert.equal(provider.photos.length, 0);
+});
 
 test('campos inválidos saem juntos e não criam perfil; incompleto continua rascunho', async () => {
     const { saved, headers } = await user();
