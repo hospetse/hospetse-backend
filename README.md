@@ -51,6 +51,41 @@ node --test test/integration/seed.test.js
 
 O teste valida criação, reexecução sem duplicatas (também dos dados de Host), JWT resolvido pelo `sub`, `/me`, pets, a busca com cada filtro sobre os Hosts do seed (pendente e inativo fora), a agenda bloqueada e ocupada e rollback por conflitos. Só remove os registros de teste. Também entra em `npm run test:integration`, mas fica ignorado sem `SEED_TEST_DATABASE_URL`; não usa o Railway como fallback. Rode separadamente dos demais testes de banco, pois exige banco vazio.
 
+## Massa de dados para o teste de carga (#577)
+
+Gera dados fictícios com `@faker-js/faker` (locale `pt_BR`) num PostgreSQL **local** de carga, para o teste de carga do HSP-PBI-083 (#579). Execução manual, fora do deploy e da pipeline.
+
+```bash
+# .env: LOAD_DATABASE_URL=postgresql://usuario:senha@localhost:5432/hospetse_load?schema=public
+npx prisma migrate deploy   # com DATABASE_URL apontando para o mesmo banco de carga
+npm run load:generate -- --tutors=10000 --hosts=1000 --reservations=20000 --conversations=2000
+npm run load:generate -- --clean-only   # só limpa
+```
+
+**Trava:** o gerador nunca lê a `DATABASE_URL`. Ele só roda com `LOAD_DATABASE_URL` em `localhost`, `127.0.0.1` ou `[::1]`, banco com nome terminado em `_load` e `NODE_ENV` diferente de `production`. Qualquer outra configuração é recusada antes de conectar.
+
+**Como funciona:**
+
+- Cada execução apaga **todas** as tabelas do banco de carga (`TRUNCATE ... CASCADE`) e gera de novo. Rodar outra vez dá o mesmo volume; se falhar no meio, rode de novo.
+- Insere em lotes de 1.000 (`createMany`). Ao fim, mostra as linhas por tabela e o tempo.
+- Grava `prisma/load/output/users.json` (fora do git) com o `authUserId` de cada Tutor e Host, os pets dos Tutores e o serviço de cada Host, para o script do k6 (#578) assinar os tokens pelo `sub` e montar as requisições. Os usuários não existem no Auth.
+
+| Entidade | Como é gerada |
+| --- | --- |
+| Tutores | Conta ativa, perfil `complete`, CPF válido e único, 18 anos ou mais, e-mail `load-tutor-N@hospetse.test` |
+| Pets | 1 a 3 por Tutor, com espécie e porte de `PET_SPECIES` e `PET_SIZES` |
+| Hosts | `hotel`, `approved` e `active` (aparecem na busca), capacidade de 1 a 10, uma diária de R$ 40 a R$ 250 e até 5 dias bloqueados nos próximos 90 |
+| Endereços | 10 cidades fixas, para a busca por cidade encontrar Hosts |
+| Reservas | `requested`, `awaiting_payment`, `accepted`, `rejected`, `checked_in` e `completed`, com datas coerentes com o status, pet compatível com o Host e preço da diária. As que ocupam vaga respeitam a capacidade do Host e não põem o mesmo pet em dois lugares no mesmo dia |
+| Conversas | Entre Tutor e Host, com 2 a 10 mensagens |
+
+Volumes de referência numa máquina de desenvolvimento, com os padrões: 11.000 usuários, 10.000 Tutores, cerca de 20.000 pets, 1.000 Hosts, 20.000 reservas, 2.000 conversas e cerca de 12.000 mensagens, em cerca de 5 s.
+
+**Pendências:**
+
+- Pet Sitter e Pet Walker entram quando o modelo deles existir (#341).
+- Pagamentos (`payment_transactions`) e registro financeiro (`financial_entries`, #528) ainda não são gerados. A limpeza já usa `TRUNCATE`, que funciona com o trigger que recusa DELETE nessa tabela.
+
 ## Pré-requisitos
 
 - **Node.js 20.12.0 ou superior** (o projeto usa `process.loadEnvFile`, disponível no Node 21.7.0 e portado para o 20.12.0 — ver ADR-009/ADR-010 na wiki). O mesmo requisito está no campo `engines` do `package.json`.
