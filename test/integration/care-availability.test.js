@@ -108,6 +108,18 @@ test('busca usa área, dia, horário e preço; contratação aceita bloqueia o h
     assert.equal((await api('GET', query(filters), tutor.headers)).data.total, 0);
     assert.deepEqual((await api('GET', `/api/v1/me/provider/availability?date=${date}`, sitter.headers)).data.busyIntervals,
         [{ startTime: '10:30', endTime: '11:30' }]);
+    const previous = new Date(`${date}T00:00:00Z`);
+    previous.setUTCDate(previous.getUTCDate() - 1);
+    const next = new Date(`${date}T00:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    await prisma.reservation.createMany({ data: [
+        { serviceId, petId: pet.id, tutorId: tutorProfile.id, status: 'accepted',
+            startDate: new Date(`${previous.toISOString().slice(0, 10)}T23:30:00-03:00`), endDate: new Date(`${date}T01:00:00-03:00`), totalValue: 50 },
+        { serviceId, petId: pet.id, tutorId: tutorProfile.id, status: 'accepted',
+            startDate: new Date(`${date}T23:00:00-03:00`), endDate: new Date(`${next.toISOString().slice(0, 10)}T01:00:00-03:00`), totalValue: 50 },
+    ] });
+    assert.deepEqual((await api('GET', `/api/v1/me/provider/availability?date=${date}`, sitter.headers)).data.busyIntervals,
+        [{ startTime: '00:00', endTime: '01:00' }, { startTime: '10:30', endTime: '11:30' }, { startTime: '23:00', endTime: '24:00' }]);
     assert.equal((await api('GET', query({ ...filters, startTime: '09:00', endTime: '10:30' }), tutor.headers)).data.total, 1);
     assert.equal((await api('PUT', '/api/v1/me/provider/availability', sitter.headers, config({ serviceCity: city, price: 75 }))).status, 200);
     assert.equal(Number((await prisma.reservation.findUnique({ where: { id: reservation.id } })).totalValue), 50);
