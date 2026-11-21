@@ -2,15 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { AppError } from '../lib/app-error.js';
 import { prisma } from '../lib/prisma.js';
 import { detectFileType, getStorage } from '../lib/storage.js';
-import { MAX_DOCUMENTS_PER_TYPE, MAX_PHOTOS } from './host-profile-policy.js';
+import { HOST_TYPES, MAX_DOCUMENTS_PER_TYPE, MAX_PHOTOS } from './host-profile-policy.js';
 
 const limitReached = (message) => new AppError(message, 409, 'FILE_LIMIT_REACHED');
 
 // Arquivo só entra em rascunho do próprio usuário: depois de enviado para validação, o cadastro não muda.
-async function findEditableDraft(user) {
-    const provider = await prisma.provider.findUnique({ where: { userId: user.id }, select: { id: true, validationStatus: true } });
-    if (!provider) throw new AppError('Cadastro de Host não encontrado', 404, 'NOT_FOUND');
-    if (provider.validationStatus !== 'draft') throw new AppError('O cadastro já foi enviado para validação', 409, 'HOST_ALREADY_SUBMITTED');
+async function findEditableDraft(user, allowedTypes) {
+    const provider = await prisma.provider.findUnique({ where: { userId: user.id }, select: { id: true, validationStatus: true, providerType: true } });
+    if (!provider || !allowedTypes.includes(provider.providerType)) throw new AppError('Cadastro de prestador não encontrado', 404, 'NOT_FOUND');
+    if (provider.validationStatus !== 'draft') throw new AppError('O cadastro já foi enviado para validação', 409, allowedTypes === HOST_TYPES ? 'HOST_ALREADY_SUBMITTED' : 'PROVIDER_ALREADY_SUBMITTED');
     return provider;
 }
 
@@ -26,8 +26,8 @@ async function storeFile(key, buffer, createRow) {
     }
 }
 
-export async function addHostDocumentService(user, type, buffer) {
-    const provider = await findEditableDraft(user);
+export async function addHostDocumentService(user, type, buffer, allowedTypes = HOST_TYPES) {
+    const provider = await findEditableDraft(user, allowedTypes);
     // shortcut: dois envios simultâneos podem passar do limite por um; aceitável para um cadastro de um usuário só.
     const count = await prisma.providerDocument.count({ where: { providerId: provider.id, type } });
     if (count >= MAX_DOCUMENTS_PER_TYPE) throw limitReached(`Limite de ${MAX_DOCUMENTS_PER_TYPE} arquivos por tipo de documento`);
@@ -39,8 +39,8 @@ export async function addHostDocumentService(user, type, buffer) {
     }));
 }
 
-export async function addHostPhotoService(user, buffer) {
-    const provider = await findEditableDraft(user);
+export async function addHostPhotoService(user, buffer, allowedTypes = HOST_TYPES) {
+    const provider = await findEditableDraft(user, allowedTypes);
     const count = await prisma.providerPhoto.count({ where: { providerId: provider.id } });
     if (count >= MAX_PHOTOS) throw limitReached(`Limite de ${MAX_PHOTOS} fotos`);
 
@@ -53,9 +53,9 @@ export async function addHostPhotoService(user, buffer) {
 
 // Só o titular recebe o link. Documento de outro usuário responde igual ao inexistente, para não revelar que existe.
 // O acesso do Administrador entra com o fluxo de validação.
-export async function hostDocumentLinkService(user, documentId) {
+export async function hostDocumentLinkService(user, documentId, allowedTypes = HOST_TYPES) {
     const document = await prisma.providerDocument.findFirst({
-        where: { id: documentId, provider: { userId: user.id } },
+        where: { id: documentId, provider: { userId: user.id, providerType: { in: allowedTypes } } },
         select: { storageKey: true },
     });
     if (!document) throw new AppError('Documento não encontrado', 404, 'NOT_FOUND');
