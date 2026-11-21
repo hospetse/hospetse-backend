@@ -707,12 +707,12 @@ GET /api/v1/me/host/agenda?startDate=2026-11-10&endDate=2026-11-13
 
 Os dados comuns dos três perfis de prestador ficam em `providers`: tipo de pessoa (`pf`/`pj`), nome, CPF/CNPJ, descrição, endereço, espécies e portes aceitos, fotos, documentos, administração de medicamentos e faixa de experiência. `pet_sitter_details` mantém o detalhe do Sitter; `pet_walker_details` guarda a duração do passeio e o raio de atuação em quilômetros. A cidade vem do endereço do prestador. A mesma conta pode ter Tutor e Provider.
 
-A migration preenche o tipo de pessoa a partir do CPF/CNPJ existente, aceitando documentos com pontuação, e deixa os demais campos novos opcionais para preservar cadastros e rascunhos. `qualification` é um tipo de documento opcional. As rotas atuais de Host continuam com o mesmo contrato; cadastro, validação de obrigatoriedade e busca de Sitter/Walker serão implementados nas tarefas de fluxo.
+A migration preenche o tipo de pessoa a partir do CPF/CNPJ existente, aceitando documentos com pontuação, e deixa os demais campos novos opcionais para preservar cadastros e rascunhos. `qualification` é um tipo de documento opcional. As rotas atuais de Host continuam com o mesmo contrato; cadastro e validação de obrigatoriedade estão na #342, e configuração e busca de Sitter/Walker na #561.
 
 **Pendências:**
 
 - `[assunção]` (#339) Faixas de experiência: `lt_1`, `1_3` e `gt_3`. Confirmar os rótulos e limites antes de exigir o campo na submissão.
-- Área de atuação e disponibilidade (#561): o raio é armazenado; regras de cálculo e exposição na busca ainda precisam ser definidas.
+- O raio é armazenado, mas a busca por distância depende de coordenadas; a #561 usa cidade e bairros.
 
 ## Cadastro de Pet Sitter e Pet Walker: `/api/v1/me/provider` (#342)
 
@@ -734,7 +734,29 @@ Os arquivos seguem o fluxo do Host: `POST /api/v1/me/provider/documents` recebe 
 | Tipo alterado, cadastro já enviado, gravação concorrente ou limite de arquivos | `409` (`PROVIDER_TYPE_CONFLICT`, `PROVIDER_ALREADY_SUBMITTED`, `PROVIDER_DRAFT_CONFLICT` ou `FILE_LIMIT_REACHED`) |
 | Armazenamento indisponível | `503 STORAGE_UNAVAILABLE` |
 
-**Pendências:** `[assunção]` (#342) O caminho `/me/provider` segue o fluxo de rascunho do Host; o card sugeria `POST /providers`. Confirmação do nome com o mobile antes da integração. A lista e os limites da experiência dependem da #339; busca/área de atuação e disponibilidade ficam para #561. O pré-preenchimento dos documentos de PF a partir do Tutor depende do fluxo de documentos do Tutor definido na #339.
+**Pendências:** `[assunção]` (#342) O caminho `/me/provider` segue o fluxo de rascunho do Host; o card sugeria `POST /providers`. Confirmação do nome com o mobile antes da integração. A lista e os limites da experiência dependem da #339. O pré-preenchimento dos documentos de PF a partir do Tutor depende do fluxo de documentos do Tutor definido na #339.
+
+## Área, horários e preço de Pet Sitter e Pet Walker (#561)
+
+**Contrato:** `GET` e `PUT /api/v1/me/provider/availability`, `GET /api/v1/providers/search` em `docs/openapi.yaml`. O `me` identifica o prestador pelo JWT. Apenas Sitter ou Walker com perfil `approved` e `active` pode consultar e alterar a própria configuração; Hotel continua no fluxo de Host. O GET antes da primeira configuração devolve `serviceCity: null`, `workingHours: []` e `price: null`.
+
+O PUT substitui a configuração completa em uma transação: `serviceCity` (uma cidade), `serviceNeighborhoods` (lista de bairros; vazia = toda a cidade), `workingHours` (dia da semana 0–6, intervalos `HH:mm` sem sobreposição), `price` positivo em reais e `durationWalkMinutes` somente para Walker. Horários usam `America/Sao_Paulo` e não atravessam a meia-noite. A cidade e os bairros não são o endereço particular do prestador. O preço fica no serviço já existente ou cria um serviço de visita/passeio; uma mudança só afeta buscas novas, sem reescrever valores já gravados nas contratações. Qualquer entrada inválida preserva a configuração anterior.
+
+```json
+{"serviceCity":"São Paulo","serviceNeighborhoods":["Centro"],"workingHours":[{"dayOfWeek":1,"startTime":"09:00","endTime":"17:00"}],"price":50,"durationWalkMinutes":60}
+```
+
+O exemplo inclui `durationWalkMinutes` para Walker; Sitter omite o campo. `GET /me/provider/availability?date=YYYY-MM-DD` acrescenta `busyIntervals` das contratações aguardando pagamento, confirmadas ou em andamento naquele dia. `GET /providers/search?providerType=pet_walker&city=São%20Paulo&neighborhood=Centro&date=2030-01-07&startTime=10:00&endTime=11:00` retorna somente prestadores aprovados, ativos, com serviço e horário compatíveis, sem contratação ocupando o intervalo. Data, início e fim devem vir juntos. Filtros de preço, pet (`petId` do Tutor ou espécie/porte/raça informados) e paginação são opcionais; listas de aceitação vazias aceitam todos, como na busca de Host. A ordem é menor preço, depois `serviceId`. CPF/CNPJ, e-mail e endereço residencial não saem na busca.
+
+| Situação | Resposta |
+| --- | --- |
+| Configuração consultada/salva ou busca válida | `200`; busca vazia retorna `items: []` e `total: 0` |
+| Campo, intervalo, preço ou query inválidos | `400 VALIDATION_ERROR`, com os campos inválidos em `details`; PUT não altera o estado |
+| JWT ausente ou inválido | `401 TOKEN_INVALID` |
+| Prestador pendente, rejeitado ou inativo | `403 PROVIDER_NOT_APPROVED` na configuração; não aparece na busca |
+| Cadastro de Sitter/Walker inexistente ou usuário não encontrado | `404 NOT_FOUND` / `USER_NOT_FOUND` |
+
+**Pendências:** `[assunção]` (#561) A área usa cidade e bairros conforme a decisão de 21/11/2026; o raio salvo no cadastro não entra na busca até haver coordenadas de localização. A duração do Walker é configurável, sem padrão automático. A criação de solicitações de visita/passeio, com revalidação do horário e snapshot do preço, pertence à #564; por isso não há solicitação nova nessa rota da #561.
 
 ## Cadastro do Host: `/api/v1/me/host`
 
