@@ -703,6 +703,17 @@ GET /api/v1/me/host/agenda?startDate=2026-11-10&endDate=2026-11-13
 - Sem recorrência ("toda segunda") nem horário de funcionamento (`provider_working_hours`).
 - Desbloqueio é por dia; desbloqueio por intervalo fica para quando o app precisar.
 
+## Modelo de Pet Sitter e Pet Walker (#341)
+
+Os dados comuns dos três perfis de prestador ficam em `providers`: tipo de pessoa (`pf`/`pj`), nome, CPF/CNPJ, descrição, endereço, espécies e portes aceitos, fotos, documentos, administração de medicamentos e faixa de experiência. `pet_sitter_details` mantém o detalhe do Sitter; `pet_walker_details` guarda a duração do passeio e o raio de atuação em quilômetros. A cidade vem do endereço do prestador. A mesma conta pode ter Tutor e Provider.
+
+A migration preenche o tipo de pessoa a partir do CPF/CNPJ existente, aceitando documentos com pontuação, e deixa os demais campos novos opcionais para preservar cadastros e rascunhos. `qualification` é um tipo de documento opcional. As rotas atuais de Host continuam com o mesmo contrato; cadastro, validação de obrigatoriedade e busca de Sitter/Walker serão implementados nas tarefas de fluxo.
+
+**Pendências:**
+
+- `[assunção]` (#339) Faixas de experiência: `lt_1`, `1_3` e `gt_3`. Confirmar os rótulos e limites antes de exigir o campo na submissão.
+- Área de atuação e disponibilidade (#561): o raio é armazenado; regras de cálculo e exposição na busca ainda precisam ser definidas.
+
 ## Cadastro do Host: `/api/v1/me/host`
 
 Rotas usadas por quem quer ser Host (Task #325, HSP-PBI-008-TSK-05). Contrato completo em `docs/openapi.yaml`.
