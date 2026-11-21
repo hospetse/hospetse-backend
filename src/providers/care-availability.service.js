@@ -6,6 +6,14 @@ import { acceptsSql } from '../hosts/host-search.service.js';
 
 const asTime = (value) => new Date(`1970-01-01T${value}:00.000Z`);
 const timeText = (value) => value.toISOString().slice(11, 16);
+const localDateTime = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+});
+const localStamp = (value) => {
+    const parts = Object.fromEntries(localDateTime.formatToParts(value).map(({ type, value: part }) => [type, part]));
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}.${String(value.getUTCMilliseconds()).padStart(3, '0')}`;
+};
 
 export async function findApprovedCare(user, db = prisma) {
     const provider = await db.provider.findUnique({ where: { userId: user.id }, select: { id: true, providerType: true, status: true, validationStatus: true, serviceCity: true, serviceNeighborhoods: true } });
@@ -16,15 +24,22 @@ export async function findApprovedCare(user, db = prisma) {
 
 async function busyIntervals(providerId, date) {
     if (!date) return [];
-    const rows = await prisma.$queryRaw`
-        SELECT to_char(GREATEST(r.start_date, (${date}::date::timestamp AT TIME ZONE 'America/Sao_Paulo')) AT TIME ZONE 'America/Sao_Paulo', 'HH24:MI') AS start_time,
-               to_char(LEAST(r.end_date, ((${date}::date + 1)::timestamp AT TIME ZONE 'America/Sao_Paulo')) AT TIME ZONE 'America/Sao_Paulo', 'HH24:MI') AS end_time
-        FROM reservations r JOIN services s ON s.id = r.service_id
-        WHERE s.provider_id = ${providerId}::uuid AND r.status IN (${Prisma.join(OCCUPYING)})
-          AND r.start_date < ((${date}::date + 1)::timestamp AT TIME ZONE 'America/Sao_Paulo')
-          AND r.end_date > (${date}::date::timestamp AT TIME ZONE 'America/Sao_Paulo')
-        ORDER BY r.start_date`;
-    return rows.map((row) => ({ startTime: row.start_time, endTime: row.end_time === '00:00' ? '24:00' : row.end_time }));
+    const day = new Date(`${date}T00:00:00Z`);
+    // shortcut: três dias UTC cobrem o dia local; calcular limites UTC exatos se o volume de reservas crescer.
+    const from = new Date(day.getTime() - 86400000);
+    const through = new Date(day.getTime() + 2 * 86400000);
+    const rows = await prisma.reservation.findMany({
+        where: { service: { providerId }, status: { in: OCCUPYING }, startDate: { lt: through }, endDate: { gt: from } },
+        select: { startDate: true, endDate: true }, orderBy: { startDate: 'asc' },
+    });
+    const startOfDay = `${date}T00:00:00.000`;
+    const endOfDay = `${new Date(day.getTime() + 86400000).toISOString().slice(0, 10)}T00:00:00.000`;
+    return rows.flatMap(({ startDate, endDate }) => {
+        const start = localStamp(startDate);
+        const end = localStamp(endDate);
+        if (start >= endOfDay || end <= startOfDay) return [];
+        return [{ startTime: start < startOfDay ? '00:00' : start.slice(11, 16), endTime: end >= endOfDay ? '24:00' : end.slice(11, 16) }];
+    });
 }
 
 export async function getCareAvailability(user, date) {
