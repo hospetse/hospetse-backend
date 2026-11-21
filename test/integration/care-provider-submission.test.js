@@ -24,6 +24,8 @@ const userIds = [];
 after(async () => {
     server.close();
     const providers = await prisma.provider.findMany({ where: { userId: { in: userIds } }, select: { addressId: true } });
+    await prisma.pet.deleteMany({ where: { tutor: { userId: { in: userIds } } } });
+    await prisma.service.deleteMany({ where: { provider: { userId: { in: userIds } } } });
     await prisma.provider.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.tutor.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.address.deleteMany({ where: { id: { in: providers.map((provider) => provider.addressId).filter(Boolean) } } });
@@ -70,7 +72,7 @@ function draft(providerType) {
     return {
         providerType, name: 'Cuidados de teste', personType: 'pf', cpfCnpj: cpf(),
         description: 'Cuidados em domicílio', administersMedication: false, experienceRange: '1_3', kilometerRadius: 5,
-        address: { zipCode: '01001000', street: 'Rua Teste', number: '1', neighborhood: 'Centro', city: 'São Paulo', state: 'SP' },
+        address: { zipCode: '01001000', street: 'Rua Teste', number: '1', neighborhood: 'Centro', city: `it-care-${randomUUID()}`, state: 'SP' },
         acceptedSpecies: ['dog'], acceptedSizes: ['small'],
     };
 }
@@ -107,6 +109,19 @@ for (const providerType of ['pet_sitter', 'pet_walker']) {
         assert.equal(Number(provider[providerType === 'pet_sitter' ? 'petSitterDetail' : 'petWalkerDetail'].kilometerRadius), 5);
         assert.equal(provider.urlPicture, provider.photos[0].url);
         assert.deepEqual(provider.documents.map((item) => item.type).sort(), ['identity', 'proof_of_address', 'qualification']);
+        const service = await prisma.service.create({ data: { providerId: provider.id, name: 'Cuidado', price: 100 } });
+        const search = await api('GET', `/api/v1/hosts/search?city=${encodeURIComponent(body.address.city)}`, headers);
+        assert.equal(search.status, 200);
+        assert.equal(search.data.total, 0);
+        assert.equal((await api('GET', `/api/v1/hosts/${provider.id}`, headers)).status, 404);
+        await prisma.user.update({ where: { id: saved.id }, data: { profileStatus: 'complete' } });
+        const pet = await prisma.pet.create({ data: { tutorId: tutor.id, petName: 'Rex', petSpecies: 'dog', petSize: 'small' } });
+        const reservation = await api('POST', '/api/v1/reservations', { ...headers, 'Idempotency-Key': randomUUID() }, {
+            serviceId: service.id, petId: pet.id, startDate: '2030-01-10', endDate: '2030-01-12',
+        });
+        assert.equal(reservation.status, 400);
+        assert.deepEqual(fields(reservation), ['serviceId']);
+        assert.equal(await prisma.reservation.count({ where: { serviceId: service.id } }), 0);
         assert.equal((await api('GET', '/api/v1/me/host', headers)).status, 404);
         assert.equal((await api('GET', '/api/v1/me/host/reservations', headers)).status, 403);
         assert.equal((await api('PUT', '/api/v1/me/provider', headers, body)).status, 409);
