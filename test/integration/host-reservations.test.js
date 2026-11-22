@@ -211,15 +211,26 @@ test('check-in do Host é único e libera só o contato do Tutor após a transi�
     const before = await list(token, { status: 'accepted' });
     assert.equal(before.status, 200);
     assert.deepEqual(before.data.items[0].tutor, { name: tutor.tutor.name });
-    assert.equal((await checkIn(other.token, reservation.id)).status, 404);
+    const forbidden = await checkIn(other.token, reservation.id);
+    const missing = await checkIn(other.token, randomUUID());
+    assert.equal(forbidden.status, 404);
+    assert.equal(missing.status, 404);
+    assert.deepEqual(forbidden.data, missing.data);
+    assert.equal(await prisma.reservation.count({ where: { id: reservation.id, status: 'accepted', checkedInAt: null } }), 1);
+    assert.equal(await prisma.notification.count({ where: { userId: tutor.user.id } }), 0);
     assert.equal((await checkIn(tutor.token, reservation.id)).status, 403);
     const invalid = await checkIn(token, reservation.id, { userId: other.provider.userId });
     assert.equal(invalid.status, 400);
     assert.deepEqual(invalid.data.details.map(({ field }) => field), ['userId']);
 
+    const startedAt = Date.now();
     const attempts = await Promise.all([checkIn(token, reservation.id), checkIn(token, reservation.id)]);
     assert.deepEqual(attempts.map(({ status }) => status).sort(), [200, 409]);
     const { data } = attempts.find(({ status }) => status === 200);
+    assert.ok(Date.parse(data.checkedInAt) >= startedAt && Date.parse(data.checkedInAt) <= Date.now());
+    const retry = await checkIn(token, reservation.id);
+    assert.equal(retry.status, 409);
+    assert.equal(retry.data.code, 'RESERVATION_NOT_CONFIRMED');
     const stored = await prisma.reservation.findUniqueOrThrow({ where: { id: reservation.id } });
     assert.equal(stored.status, 'checked_in');
     assert.deepEqual(data, { id: reservation.id, status: 'checked_in', checkedInAt: stored.checkedInAt.toISOString() });
@@ -228,8 +239,27 @@ test('check-in do Host é único e libera só o contato do Tutor após a transi�
 
     const after = await list(token, { status: 'checked_in' });
     assert.equal(after.status, 200);
+    assert.equal(after.data.items[0].checkedInAt, data.checkedInAt);
     assert.deepEqual(after.data.items[0].tutor, { name: tutor.tutor.name, phone: tutor.tutor.phone, address });
     assert.deepEqual((await list(other.token, { status: 'checked_in' })).data.items, []);
+});
+
+test('reserva em andamento sem horário de check-in mantém o contato do Tutor oculto', async () => {
+    const tutor = await newTutor();
+    const { token, service } = await newHost();
+    const address = await prisma.address.create({
+        data: { zipCode: '87000000', street: 'Rua de Teste', number: '12', neighborhood: 'Centro', city: 'Maringá', state: 'PR' },
+    });
+    addressIds.push(address.id);
+    await prisma.tutor.update({ where: { id: tutor.tutor.id }, data: { addressId: address.id } });
+    const reservation = await newReservation(tutor, service, { status: 'checked_in' });
+
+    const res = await list(token, { status: 'checked_in' });
+    assert.equal(res.status, 200);
+    const [item] = res.data.items;
+    assert.equal(item.id, reservation.id);
+    assert.equal(Object.hasOwn(item, 'checkedInAt'), false);
+    assert.deepEqual(item.tutor, { name: tutor.tutor.name });
 });
 
 test('check-in recusa pagamento pendente e data futura sem alterar a reserva', async () => {
