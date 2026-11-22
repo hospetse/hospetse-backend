@@ -16,6 +16,36 @@ async function findOwnReservation(tx, hostId, id) {
 
 const alreadyDecided = () => new AppError('A solicitação já foi decidida', 409, 'RESERVATION_ALREADY_DECIDED');
 
+export function checkInHostReservationService(host, id) {
+    return prisma.$transaction(async (tx) => {
+        const reservation = await findOwnReservation(tx, host.id, id);
+        const notConfirmed = new AppError('Apenas reservas confirmadas podem receber check-in', 409, 'RESERVATION_NOT_CONFIRMED');
+        if (reservation.status !== 'accepted') throw notConfirmed;
+
+        const checkedInAt = new Date();
+        const today = new Date(checkedInAt.toISOString().slice(0, 10));
+        if (reservation.startDate > today) {
+            throw new AppError('O check-in só pode ser registrado a partir da data de início', 409, 'CHECK_IN_TOO_EARLY');
+        }
+
+        const status = 'checked_in';
+        const { count } = await tx.reservation.updateMany({
+            where: { id, status: 'accepted', service: { providerId: host.id }, startDate: { lte: today } },
+            data: { status, checkedInAt },
+        });
+        if (!count) throw notConfirmed;
+
+        await tx.notification.create({
+            data: {
+                userId: reservation.tutor.userId,
+                type: 'reservation_checked_in',
+                content: JSON.stringify({ reservationId: id }),
+            },
+        });
+        return { id, status, checkedInAt };
+    });
+}
+
 // Muda o status só se ainda estiver pendente: com duas decisões ao mesmo tempo, o banco deixa só uma alterar a linha.
 // shortcut: sem prazo de expiração (TBD na HSP-PBI-042); quando existir, entra aqui como mais uma condição do where.
 async function decide(tx, id, data) {

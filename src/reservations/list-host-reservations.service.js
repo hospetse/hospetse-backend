@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 
-// Do Tutor só o nome de exibição (LGPD); do pet, o que o Host precisa para decidir e cuidar.
+// Antes do check-in, do Tutor só o nome de exibição.
 const HOST_RESERVATION_FIELDS = {
     id: true,
     status: true,
@@ -19,11 +19,20 @@ const HOST_RESERVATION_FIELDS = {
 // O filtro pelos serviços do próprio Host é o que impede um Host de ver as solicitações de outro.
 export async function listHostReservationsService(hostId, { status, page, pageSize }) {
     const where = { status, service: { providerId: hostId } };
+    const select = status === 'checked_in' ? {
+        ...HOST_RESERVATION_FIELDS,
+        checkedInAt: true,
+        tutor: { select: {
+            name: true,
+            phone: true,
+            address: { select: { zipCode: true, street: true, number: true, complement: true, neighborhood: true, city: true, state: true } },
+        } },
+    } : HOST_RESERVATION_FIELDS;
     const [items, total] = await prisma.$transaction([
         // A mais antiga primeiro: quem pediu antes é respondido antes
         prisma.reservation.findMany({
             where,
-            select: HOST_RESERVATION_FIELDS,
+            select,
             orderBy: [{ createdDate: 'asc' }, { id: 'asc' }],
             skip: (page - 1) * pageSize,
             take: pageSize,

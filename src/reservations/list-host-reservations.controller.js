@@ -2,8 +2,7 @@ import { AppError } from '../lib/app-error.js';
 import { requireHost } from '../hosts/host-policy.js';
 import { listHostReservationsService } from './list-host-reservations.service.js';
 import { checkQueryFields, isSingleValue, parsePagination } from '../lib/query.js';
-// shortcut: só as pendentes, que é o que a #485 pede; abrir os outros status quando alguma tela precisar
-const STATUSES = ['requested'];
+const STATUSES = ['requested', 'accepted', 'checked_in'];
 
 // GET /api/v1/me/host/reservations?status=requested&page=1&pageSize=20 (HSP-PBI-041-TSK-01 #485).
 // Ordem no app.js: JWT do usuário → este controller. O Host vem só do JWT (req.user), nunca da URL.
@@ -45,7 +44,13 @@ function toResponse(reservation) {
         totalValue: Number(reservation.totalValue),
         notes: reservation.notes,
         createdAt: reservation.createdDate.toISOString(),
-        tutor: { name: reservation.tutor.name },
+        ...(reservation.checkedInAt ? { checkedInAt: reservation.checkedInAt.toISOString() } : {}),
+        tutor: {
+            name: reservation.tutor.name,
+            ...(reservation.status === 'checked_in' && reservation.checkedInAt
+                ? { phone: reservation.tutor.phone, address: reservation.tutor.address }
+                : {}),
+        },
         pet: {
             name: reservation.pet.petName,
             species: reservation.pet.petSpecies,
