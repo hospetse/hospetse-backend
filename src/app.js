@@ -27,7 +27,7 @@ import { startContractController } from './contracts/contracts.controller.js';
 import { createPetController, deletePetController, listPetsController, updatePetController } from './pets/pet.controller.js';
 import { createReservationController } from './reservations/create-reservation.controller.js';
 import { listHostReservationsController } from './reservations/list-host-reservations.controller.js';
-import { acceptHostReservationController, rejectHostReservationController } from './reservations/decide-host-reservation.controller.js';
+import { acceptHostReservationController, checkInHostReservationController, rejectHostReservationController } from './reservations/decide-host-reservation.controller.js';
 import { stripeWebhookController } from './payments/webhook.controller.js';
 import { getContractPaymentController, payContractController } from './payments/contract-payment.controller.js';
 import { listMessagesController, openConversationController } from './conversations/conversation.controller.js';
@@ -130,6 +130,7 @@ app.delete('/api/v1/me/pets/:id', deletePetController);
 
 // Solicitação de hospedagem (HSP-PBI-039-TSK-01 #494). Ordem: JWT do usuário → conta e perfil aptos → leitura do JSON → controller.
 app.post('/api/v1/reservations', express.json(), createReservationController);
+app.patch('/api/v1/reservations/:id/check-in', express.json(), checkInHostReservationController);
 
 // Pagamento da contratação (HSP-PBI-067-TSK-01 #530). Ordem: JWT do usuário → conta e perfil aptos → JSON → controller.
 app.post('/api/v1/contracts/:id/payment', requireCanContract, express.json(), payContractController);

@@ -29,12 +29,14 @@ const http = axios.create({ baseURL: `http://localhost:${server.address().port}`
 const userIds = [];
 const tutorIds = [];
 const providerIds = [];
+const addressIds = [];
 
 after(async () => {
     server.close();
     await prisma.reservation.deleteMany({ where: { tutorId: { in: tutorIds } } });
     await prisma.pet.deleteMany({ where: { tutorId: { in: tutorIds } } });
     await prisma.tutor.deleteMany({ where: { id: { in: tutorIds } } });
+    await prisma.address.deleteMany({ where: { id: { in: addressIds } } });
     await prisma.service.deleteMany({ where: { providerId: { in: providerIds } } });
     await prisma.provider.deleteMany({ where: { id: { in: providerIds } } });
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
@@ -185,8 +187,68 @@ test('a mais antiga primeiro, com paginação', async () => {
 
 test('parâmetros inválidos: 400 com todos os campos', async () => {
     const { token } = await newHost();
-    const res = await list(token, { status: 'accepted', page: 0, pageSize: 51 });
+    const res = await list(token, { status: 'unknown', page: 0, pageSize: 51 });
     assert.strictEqual(res.status, 400);
     assert.strictEqual(res.data.code, 'VALIDATION_ERROR');
     assert.deepStrictEqual(res.data.details.map((detail) => detail.field), ['status', 'page', 'pageSize']);
+});
+
+const checkIn = (token, id, body) => http.patch(`/api/v1/reservations/${id}/check-in`, body, {
+    headers: { Authorization: `Bearer ${token}` },
+});
+
+test('check-in do Host é único e libera só o contato do Tutor após a transição', async () => {
+    const tutor = await newTutor();
+    const { token, service } = await newHost();
+    const other = await newHost();
+    const address = { zipCode: '87000000', street: 'Rua de Teste', number: '12', complement: null, neighborhood: 'Centro', city: 'Maringá', state: 'PR' };
+    const savedAddress = await prisma.address.create({ data: address });
+    addressIds.push(savedAddress.id);
+    await prisma.tutor.update({ where: { id: tutor.tutor.id }, data: { addressId: savedAddress.id } });
+    const today = new Date(new Date().toISOString().slice(0, 10));
+    const reservation = await newReservation(tutor, service, { status: 'accepted', startDate: today, endDate: new Date(today.getTime() + 86400000) });
+
+    const before = await list(token, { status: 'accepted' });
+    assert.equal(before.status, 200);
+    assert.deepEqual(before.data.items[0].tutor, { name: tutor.tutor.name });
+    assert.equal((await checkIn(other.token, reservation.id)).status, 404);
+    assert.equal((await checkIn(tutor.token, reservation.id)).status, 403);
+    const invalid = await checkIn(token, reservation.id, { userId: other.provider.userId });
+    assert.equal(invalid.status, 400);
+    assert.deepEqual(invalid.data.details.map(({ field }) => field), ['userId']);
+
+    const attempts = await Promise.all([checkIn(token, reservation.id), checkIn(token, reservation.id)]);
+    assert.deepEqual(attempts.map(({ status }) => status).sort(), [200, 409]);
+    const { data } = attempts.find(({ status }) => status === 200);
+    const stored = await prisma.reservation.findUniqueOrThrow({ where: { id: reservation.id } });
+    assert.equal(stored.status, 'checked_in');
+    assert.deepEqual(data, { id: reservation.id, status: 'checked_in', checkedInAt: stored.checkedInAt.toISOString() });
+    const notifications = await prisma.notification.findMany({ where: { userId: tutor.user.id, type: 'reservation_checked_in' } });
+    assert.deepEqual(notifications.map(({ content }) => JSON.parse(content)), [{ reservationId: reservation.id }]);
+
+    const after = await list(token, { status: 'checked_in' });
+    assert.equal(after.status, 200);
+    assert.deepEqual(after.data.items[0].tutor, { name: tutor.tutor.name, phone: tutor.tutor.phone, address });
+    assert.deepEqual((await list(other.token, { status: 'checked_in' })).data.items, []);
+});
+
+test('check-in recusa pagamento pendente e data futura sem alterar a reserva', async () => {
+    const tutor = await newTutor();
+    const { service, token } = await newHost();
+    const today = new Date(new Date().toISOString().slice(0, 10)).getTime();
+    for (const [status, days, code] of [
+        ['awaiting_payment', 0, 'RESERVATION_NOT_CONFIRMED'],
+        ['accepted', 1, 'CHECK_IN_TOO_EARLY'],
+    ]) {
+        const reservation = await newReservation(tutor, service, {
+            status, startDate: new Date(today + days * 86400000), endDate: new Date(today + 2 * 86400000),
+        });
+        const res = await checkIn(token, reservation.id);
+        assert.equal(res.status, 409);
+        assert.equal(res.data.code, code);
+        const stored = await prisma.reservation.findUniqueOrThrow({ where: { id: reservation.id } });
+        assert.equal(stored.status, status);
+        assert.equal(stored.checkedInAt, null);
+    }
+    assert.equal(await prisma.notification.count({ where: { userId: tutor.user.id } }), 0);
 });

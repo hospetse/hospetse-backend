@@ -285,6 +285,7 @@ model Reservation {
   status           String               @default("requested") @db.VarChar(20)
   rejectionReason  String?              @map("rejection_reason") @db.VarChar(500)
   decidedAt        DateTime?            @map("decided_at") @db.Timestamptz(3)
+  checkedInAt      DateTime?            @map("checked_in_at") @db.Timestamptz(3)
   startDate        DateTime             @map("start_date") @db.Timestamptz(3)
   endDate          DateTime?            @map("end_date") @db.Timestamptz(3)
   createdDate      DateTime             @default(now()) @map("created_date") @db.Timestamptz(3)

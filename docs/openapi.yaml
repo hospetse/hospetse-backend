@@ -816,15 +816,14 @@ paths:
     get:
       tags: [Host]
       operationId: listHostReservations
-      summary: Lista as solicitações pendentes recebidas pelo Host (#485)
+      summary: Lista reservas pendentes, confirmadas ou em andamento do Host (#485, #536)
       description: |
         Só as solicitações dos serviços do Host do `sub` do JWT, da mais antiga para a mais nova.
-        Do Tutor sai só o nome de exibição (LGPD).
+        Antes do check-in, do Tutor sai apenas o nome. O telefone e o endereço só aparecem ao Host responsável em reservas em andamento com check-in registrado.
       parameters:
         - name: status
           in: query
-          description: Por enquanto só `requested` (pendente)
-          schema: { type: string, enum: [requested], default: requested }
+          schema: { type: string, enum: [requested, accepted, checked_in], default: requested }
         - name: page
           in: query
           schema: { type: integer, minimum: 1, default: 1 }
@@ -833,7 +832,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
       responses:
         '200':
-          description: Página de solicitações; lista vazia quando não há pendentes
+          description: Página de reservas no estado selecionado.
           content:
             application/json:
               schema:
@@ -853,6 +852,42 @@ paths:
         '401': { $ref: '#/components/responses/TokenInvalid' }
         '403': { $ref: '#/components/responses/NotHost' }
         '404': { $ref: '#/components/responses/UserNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/reservations/{id}/check-in:
+    patch:
+      tags: [Host]
+      operationId: checkInHostReservation
+      summary: Registra o check-in da hospedagem (#536)
+      description: Só o Host responsável pode registrar uma reserva confirmada a partir da data de início (dia UTC). A operação não recebe body.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Check-in realizado e notificação registrada para o Tutor.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status, checkedInAt]
+                properties:
+                  id: { type: string, format: uuid }
+                  status: { type: string, const: checked_in }
+                  checkedInAt: { type: string, format: date-time }
+        '400':
+          description: Body ou parâmetros de consulta fora do contrato.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotHost' }
+        '404':
+          description: Reserva inexistente ou de outro Host.
+        '409':
+          description: Reserva não confirmada ou já registrada (RESERVATION_NOT_CONFIRMED), ou data de início ainda não atingida (CHECK_IN_TOO_EARLY).
         '500': { $ref: '#/components/responses/InternalError' }
 
   /api/v1/me/host/reservations/{id}/accept:
@@ -2229,7 +2264,7 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        status: { type: string, enum: [requested] }
+        status: { type: string, enum: [requested, accepted, checked_in] }
         serviceId: { type: string, format: uuid }
         startDate: { type: string, format: date }
         endDate: { type: [string, 'null'], format: date }
@@ -2237,11 +2272,23 @@ components:
         totalValue: { type: number, description: Valor total no momento da solicitação (snapshot) }
         notes: { type: [string, 'null'] }
         createdAt: { type: string, format: date-time }
+        checkedInAt: { type: string, format: date-time, description: Presente após um check-in registrado }
         tutor:
           type: object
-          description: Só o nome de exibição; CPF, telefone e e-mail não saem (LGPD)
+          description: Telefone e endereço só aparecem em uma reserva em andamento com check-in registrado.
           properties:
             name: { type: string }
+            phone: { type: [string, 'null'] }
+            address:
+              type: [object, 'null']
+              properties:
+                zipCode: { type: string }
+                street: { type: string }
+                number: { type: string }
+                complement: { type: [string, 'null'] }
+                neighborhood: { type: string }
+                city: { type: string }
+                state: { type: string }
         pet:
           type: object
           properties:
