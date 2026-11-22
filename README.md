@@ -41,6 +41,16 @@ Reexecutar preserva IDs e a data de conclusão do perfil, restaura os dados de d
 
 Após os dois seeds, faça login no Auth (`POST /api/v1/auth/login`) e use o access token no back-end em `GET /api/v1/me`. O Tutor completo retorna `canContract: true` e três pets em `GET /api/v1/me/pets`; o incompleto retorna `canContract: false`. O papel de Administrador é persistido no banco; confirme com `GET /api/v1/admin/me` (`{ id, accountType }`). A recuperação da senha do Administrador é feita no seed do Auth (`SEED_ADMIN_PASSWORD`, #314 / DA-07), não por rota pública.
 
+### Contratações de demonstração (#573)
+
+Com as migrations aplicadas em um PostgreSQL local, execute `npx prisma db seed -- --contracts` na pasta do backend. A opção exige uma conexão em localhost fora de produção. O seed acrescenta cinco hospedagens de `tutor.completo@hospetse.dev` com `host.aberto@hospetse.dev`: aguardando aceite, aguardando pagamento, confirmada para o dia atual (UTC), em andamento e concluída.
+
+O seed restaura os cenários com os mesmos IDs ao repetir a execução. A reserva confirmada volta a ficar pronta para check-in no dia da execução. A confirmada, a em andamento e a concluída têm pagamento simulado aprovado e lançamento financeiro, sem chamar o gateway. Para login no Mobile, rode o seed do Auth no mesmo ambiente conforme as instruções acima. As contas são fictícias e as senhas são configuradas no Auth.
+
+`[provisório]` A matriz de visitas e passeios depende da configuração de área, disponibilidade e preço da #561. A disponibilização em ambiente compartilhado fica para depois que as migrations necessárias estiverem aplicadas.
+
+Para validar a #573, use um schema PostgreSQL local vazio com prefixo `seed_573_test_`. Aplique as migrations nesse schema, configure `SEED_CONTRACTS_TEST_DATABASE_URL` no processo e rode `node --test test/integration/seed.test.js`. O teste executa o seed duas vezes. Os lançamentos financeiros são imutáveis, então use um schema descartável para cada rodada.
+
 ### Teste isolado do seed
 
 Configure no processo `SEED_TEST_DATABASE_URL` apontando para um PostgreSQL local **vazio e descartável**, com nome terminado em `_seed_test`. Aplique as migrations nesse banco usando `DATABASE_URL` com o mesmo valor. Execute:
