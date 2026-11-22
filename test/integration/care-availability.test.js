@@ -53,10 +53,13 @@ const monday = () => {
 test('só Sitter ou Walker aprovado e autenticado configura; inválido preserva a versão anterior', async () => {
     const sitter = await user('pet_sitter');
     const pending = await user('pet_walker', 'draft');
+    const rejected = await user('pet_sitter', 'rejected');
     const hotel = await user('hotel');
     assert.equal((await api('GET', '/api/v1/me/provider/availability')).status, 401);
     assert.equal((await api('PUT', '/api/v1/me/provider/availability', pending.headers, config({ durationWalkMinutes: 60 }))).status, 403);
     assert.equal((await api('GET', '/api/v1/me/provider/availability', pending.headers)).status, 403);
+    assert.equal((await api('PUT', '/api/v1/me/provider/availability', rejected.headers, config())).status, 403);
+    assert.equal((await prisma.service.count({ where: { providerId: rejected.provider.id } })), 0);
     assert.equal((await api('GET', '/api/v1/me/provider/availability', hotel.headers)).status, 404);
     const empty = await api('GET', '/api/v1/me/provider/availability', sitter.headers);
     assert.equal(empty.status, 200);
@@ -66,6 +69,17 @@ test('só Sitter ou Walker aprovado e autenticado configura; inválido preserva 
     assert.equal(saved.data.price, 50);
     assert.deepEqual(saved.data.workingHours, config().workingHours);
     assert.equal((await prisma.service.count({ where: { providerId: sitter.provider.id } })), 1);
+    const beforeInvalid = (await api('GET', '/api/v1/me/provider/availability', sitter.headers)).data;
+    for (const [change, field] of [
+        [{ serviceNeighborhoods: ['Centro', 'centro'] }, 'serviceNeighborhoods.1'],
+        [{ workingHours: [{ dayOfWeek: 1, startTime: '10:00', endTime: '10:00' }] }, 'workingHours.0.endTime'],
+        [{ price: 50.001 }, 'price'],
+    ]) {
+        const response = await api('PUT', '/api/v1/me/provider/availability', sitter.headers, config(change));
+        assert.equal(response.status, 400);
+        assert.deepEqual(response.data.details.map((item) => item.field), [field]);
+        assert.deepEqual((await api('GET', '/api/v1/me/provider/availability', sitter.headers)).data, beforeInvalid);
+    }
     const invalid = await api('PUT', '/api/v1/me/provider/availability', sitter.headers, config({ price: -1, serviceCity: '',
         workingHours: [{ dayOfWeek: 1, startTime: '11:00', endTime: '12:00' }, { dayOfWeek: 1, startTime: '11:30', endTime: '13:00' }],
         userId: pending.saved.id }));
@@ -104,7 +118,10 @@ test('busca usa área, dia, horário e preço; contratação aceita bloqueia o h
     assert.equal((await api('GET', query({ ...filters, providerType: 'pet_walker', neighborhood: 'Moema' }), tutor.headers)).data.total, 1);
     const serviceId = available.data.items[0].serviceId;
     const reservation = await prisma.reservation.create({ data: { serviceId, petId: pet.id, tutorId: tutorProfile.id,
-        status: 'accepted', startDate: new Date(`${date}T10:30:00-03:00`), endDate: new Date(`${date}T11:30:00-03:00`), totalValue: 50, dailyPrice: 50 } });
+        status: 'requested', startDate: new Date(`${date}T10:30:00-03:00`), endDate: new Date(`${date}T11:30:00-03:00`), totalValue: 50, dailyPrice: 50 } });
+    assert.equal((await api('GET', query(filters), tutor.headers)).data.total, 1);
+    assert.deepEqual((await api('GET', `/api/v1/me/provider/availability?date=${date}`, sitter.headers)).data.busyIntervals, []);
+    await prisma.reservation.update({ where: { id: reservation.id }, data: { status: 'accepted' } });
     assert.equal((await api('GET', query(filters), tutor.headers)).data.total, 0);
     assert.deepEqual((await api('GET', `/api/v1/me/provider/availability?date=${date}`, sitter.headers)).data.busyIntervals,
         [{ startTime: '10:30', endTime: '11:30' }]);
@@ -124,6 +141,37 @@ test('busca usa área, dia, horário e preço; contratação aceita bloqueia o h
     assert.equal((await api('PUT', '/api/v1/me/provider/availability', sitter.headers, config({ serviceCity: city, price: 75 }))).status, 200);
     assert.equal(Number((await prisma.reservation.findUnique({ where: { id: reservation.id } })).totalValue), 50);
     assert.equal((await api('GET', query({ ...filters, startTime: '09:00', endTime: '10:30', maxPrice: 60 }), tutor.headers)).data.total, 0);
+});
+
+test('Walker atualiza área, horário, preço e duração; a busca usa apenas a configuração nova', async () => {
+    const walker = await user('pet_walker');
+    const tutor = await user();
+    const oldCity = `it-area-${randomUUID()}`;
+    const newCity = `it-area-${randomUUID()}`;
+    assert.equal((await api('PUT', '/api/v1/me/provider/availability', walker.headers,
+        config({ serviceCity: oldCity, serviceNeighborhoods: [], durationWalkMinutes: 60 }))).status, 200);
+    const updated = config({ serviceCity: newCity, serviceNeighborhoods: ['Centro'],
+        workingHours: [{ dayOfWeek: 1, startTime: '12:00', endTime: '14:00' }], price: 95, durationWalkMinutes: 45 });
+    assert.equal((await api('PUT', '/api/v1/me/provider/availability', walker.headers, updated)).status, 200);
+    const current = await api('GET', '/api/v1/me/provider/availability', walker.headers);
+    assert.equal(current.status, 200);
+    assert.deepEqual(current.data, { providerType: 'pet_walker', serviceCity: newCity,
+        serviceNeighborhoods: ['Centro'], workingHours: updated.workingHours,
+        price: 95, durationWalkMinutes: 45, busyIntervals: [] });
+    const invalid = await api('PUT', '/api/v1/me/provider/availability', walker.headers,
+        { ...updated, durationWalkMinutes: 0 });
+    assert.equal(invalid.status, 400);
+    assert.deepEqual(invalid.data.details.map((item) => item.field), ['durationWalkMinutes']);
+    assert.deepEqual((await api('GET', '/api/v1/me/provider/availability', walker.headers)).data, current.data);
+    const filters = { providerType: 'pet_walker', city: newCity, neighborhood: 'centro',
+        date: monday(), startTime: '12:00', endTime: '13:00' };
+    const found = await api('GET', query(filters), tutor.headers);
+    assert.equal(found.data.total, 1);
+    assert.equal(found.data.items[0].providerId, walker.provider.id);
+    assert.equal(found.data.items[0].price, 95);
+    assert.equal(found.data.items[0].durationWalkMinutes, 45);
+    assert.equal((await api('GET', query({ ...filters, city: oldCity }), tutor.headers)).data.total, 0);
+    assert.equal((await api('GET', query({ ...filters, startTime: '10:00', endTime: '11:00' }), tutor.headers)).data.total, 0);
 });
 
 test('busca pagina por preço sem repetir nem omitir ofertas', async () => {

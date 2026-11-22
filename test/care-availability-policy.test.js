@@ -23,6 +23,20 @@ test('campos inválidos saem juntos, incluindo horário sobreposto e identidade 
     ] }, 'pet_sitter')), ['workingHours']);
 });
 
+test('recusa separadamente área, horário e preço inválidos sem produzir configuração', () => {
+    const cases = [
+        [{ serviceNeighborhoods: ['Centro', 'centro'] }, ['serviceNeighborhoods.1']],
+        [{ workingHours: [{ dayOfWeek: 1, startTime: '10:00', endTime: '10:00' }] }, ['workingHours.0.endTime']],
+        [{ price: 50.001 }, ['price']],
+        [{ durationWalkMinutes: 0 }, ['durationWalkMinutes']],
+    ];
+    for (const [change, expected] of cases) {
+        const result = parseCareAvailability({ ...valid(), durationWalkMinutes: 60, ...change }, 'pet_walker');
+        assert.deepEqual(fields(result), expected);
+        assert.equal(result.data, undefined);
+    }
+});
+
 test('busca exige tipo, cidade e intervalo completo quando a data é informada', () => {
     assert.deepEqual(fields(parseCareSearch({ providerType: 'hotel', city: '', date: '2030-01-07', startTime: '10:00', maxPrice: '-1', userId: 'outro' })),
         ['userId', 'providerType', 'city', 'endTime', 'maxPrice']);
