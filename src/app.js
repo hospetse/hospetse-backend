@@ -19,6 +19,7 @@ import { getCareProfileController, getHostProfileController, saveCareDraftContro
 import { addCareDocumentController, addCarePhotoController, addHostDocumentController, addHostPhotoController, careDocumentLinkController, hostDocumentLinkController } from './hosts/host-files.controller.js';
 import { uploadFile } from './middlewares/upload-file.js';
 import { searchHostsController } from './hosts/host-search.controller.js';
+import { getCareAvailabilityController, saveCareAvailabilityController, searchCareProvidersController } from './providers/care-availability.controller.js';
 import { blockPeriodController, getAgendaController, unblockDayController } from './hosts/agenda.controller.js';
 import { requireCanContract } from './middlewares/can-contract.js';
 import { requireAdmin } from './middlewares/admin-only.js';
@@ -117,6 +118,7 @@ app.put('/api/v1/me/tutor-profile', express.json(), tutorProfileController);
 
 // Busca de Hosts (HSP-PBI-030-TSK-01 #476). Antes de /hosts/:id: senão "search" cai no controller de detalhes (404).
 app.get('/api/v1/hosts/search', searchHostsController);
+app.get('/api/v1/providers/search', searchCareProvidersController);
 // Detalhes públicos do Host (HSP-PBI-031-TSK-01 #479). Ordem: JWT do usuário → controller (GET, sem body).
 app.get('/api/v1/hosts/:id', hostDetailsController);
 
@@ -155,6 +157,8 @@ app.post('/api/v1/me/provider/submit', express.json(), submitCareProfileControll
 app.post('/api/v1/me/provider/documents', uploadFile('document'), addCareDocumentController);
 app.post('/api/v1/me/provider/photos', uploadFile('photo'), addCarePhotoController);
 app.get('/api/v1/me/provider/documents/:id', careDocumentLinkController);
+app.get('/api/v1/me/provider/availability', getCareAvailabilityController);
+app.put('/api/v1/me/provider/availability', express.json(), saveCareAvailabilityController);
 
 app.put('/api/v1/me/host', express.json(), saveHostDraftController);
 app.get('/api/v1/me/host', getHostProfileController);

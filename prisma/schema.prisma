@@ -89,6 +89,8 @@ model Provider {
   description           String?                @db.VarChar(2000)
   administersMedication Boolean?               @map("administers_medication")
   experienceRange       String?                @map("experience_range") @db.VarChar(10)
+  serviceCity           String?                @map("service_city") @db.VarChar(100)
+  serviceNeighborhoods  String[]               @default([]) @map("service_neighborhoods") @db.VarChar(100)
   // Quando o cadastro foi enviado para validação (#398): ordena a fila do Administrador. updatedAt não serve, muda a cada edição
   submittedAt           DateTime?              @map("submitted_at") @db.Timestamptz(3)
   // Decisão do Administrador (#404): quem decidiu, quando e o motivo da reprovação, gravados juntos com o validation_status
