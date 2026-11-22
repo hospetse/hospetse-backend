@@ -4,6 +4,7 @@ import { prisma } from '../src/lib/prisma.js';
 import { isValidCpf } from '../src/lib/cpf.js';
 import { isAdult, missingFields } from '../src/users/profile-policy.js';
 import { PET_SPECIES, PET_SIZES } from '../src/pets/pet-policy.js';
+import { recordPaymentEntry } from '../src/payments/financial-entries.service.js';
 import { accounts } from './seed-accounts.js';
 import { profile, address, pets, hosts } from './seed-data.js';
 
@@ -12,6 +13,51 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const today = Date.parse(new Date().toISOString().slice(0, 10));
 const fromToday = (days) => new Date(today + days * DAY_MS);
 const conflict = (what) => `${what}; nenhuma alteração foi salva.`;
+const seedContracts = process.argv.includes('--contracts');
+
+async function seedHotelContracts(tx, tutor, host) {
+    assert(tutor, conflict('Contratações do seed sem o Tutor completo'));
+    const { provider, service } = host;
+    const scenarios = [
+        ['01', 'requested', 4, 5],
+        ['02', 'awaiting_payment', 2, 3],
+        ['03', 'accepted', 0, 1],
+        ['04', 'checked_in', -1, 2],
+        ['05', 'completed', -4, -3],
+    ];
+    for (const [suffix, status, from, to] of scenarios) {
+        const id = `57300000-0000-4000-8000-0000000000${suffix}`;
+        const petId = pets[status === 'checked_in' ? 2 : 0].id;
+        const existing = await tx.reservation.findUnique({ where: { id }, select: { tutorId: true, petId: true, serviceId: true } });
+        assert(!existing || (existing.tutorId === tutor.id && existing.petId === petId && existing.serviceId === service.id),
+            conflict('Contratação #573 pertence a outro cadastro'));
+
+        const checkedIn = status === 'checked_in' || status === 'completed';
+        const paid = status === 'accepted' || checkedIn;
+        const totalValue = service.price * (to - from);
+        const data = {
+            tutorId: tutor.id, petId, serviceId: service.id, status,
+            startDate: fromToday(from), endDate: fromToday(to),
+            createdDate: fromToday(Math.min(-1, from - 2)),
+            decidedAt: status === 'requested' ? null : fromToday(Math.min(0, from - 1)),
+            checkedInAt: checkedIn ? new Date(fromToday(from).getTime() + 12 * 60 * 60 * 1000) : null,
+            dailyPrice: service.price, totalValue,
+        };
+        await tx.reservation.upsert({ where: { id }, update: data, create: { id, ...data } });
+        if (!paid) continue;
+
+        const paymentId = `57300000-0000-4000-8000-0000000001${suffix}`;
+        const transaction = await tx.paymentTransaction.upsert({
+            where: { id: paymentId },
+            update: {},
+            create: { id: paymentId, reservationId: id, type: 'payment', status: 'approved', value: totalValue, createdDate: data.decidedAt },
+        });
+        assert(transaction.reservationId === id && transaction.type === 'payment'
+            && transaction.status === 'approved' && transaction.value.equals(totalValue),
+        conflict('Pagamento #573 diverge do cenário de demonstração'));
+        await recordPaymentEntry(tx, { ...transaction, reservation: { tutorId: tutor.id, service: { providerId: provider.id } } });
+    }
+}
 
 // Host do seed (#498): endereço, prestador, diária, capacidade, fotos e agenda, todos por id fixo.
 // Fotos, bloqueios e a reserva de ocupação são recriados a cada execução: o total não cresce e as datas acompanham o dia.
@@ -67,6 +113,11 @@ async function seedHost(tx, user, current, host, seedTutor) {
 
 try {
     assert(process.env.DATABASE_URL, 'DATABASE_URL ausente.');
+    if (seedContracts) {
+        const { hostname, protocol } = new URL(process.env.DATABASE_URL);
+        assert(['postgres:', 'postgresql:'].includes(protocol) && ['localhost', '127.0.0.1', '[::1]'].includes(hostname)
+            && process.env.NODE_ENV !== 'production', 'O seed de contratações #573 exige PostgreSQL local fora de produção.');
+    }
     assert(isValidCpf(profile.cpf), 'CPF do seed inválido.');
     assert(isAdult(profile.birthDate.toISOString().slice(0, 10)), 'Tutor do seed deve ser adulto.');
     assert(missingFields({ tutor: { ...profile, address } }).length === 0, 'Perfil do seed incompleto.');
@@ -120,9 +171,11 @@ try {
                 await tx.pet.upsert({ where: { id: pet.id }, update: pet, create: { ...pet, tutorId: tutor.id } });
             }
         }
+        if (seedContracts) await seedHotelContracts(tx, seedTutor, hosts.find(({ key }) => key === 'aberto'));
     // O seed faz dezenas de consultas sequenciais ao banco remoto; os Hosts (#498) dobraram a conta, então 60 s.
     }, { timeout: 60000 });
     console.log(`Seed concluído: ${accounts.length} contas, ${pets.length} pets e ${hosts.length} Hosts.`);
+    if (seedContracts) console.log('Seed #573 concluído: cinco contratações de hospedagem.');
 } catch (error) {
     const code = /^P\d{4}$/.test(error.code) ? ` (${error.code})` : '';
     console.error(error instanceof AssertionError ? error.message : `Falha no seed${code}; transação revertida. Verifique a conexão e conflitos nos dados reservados.`);

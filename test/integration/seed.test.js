@@ -9,6 +9,56 @@ import { pets, hosts } from '../../prisma/seed-data.js';
 const day = (offset) => new Date(Date.now() + offset * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 const hostId = Object.fromEntries(hosts.map((host) => [host.key, host.provider.id]));
 
+test('seed #573 cria as cinco hospedagens e preserva os IDs ao repetir', { skip: !process.env.SEED_CONTRACTS_TEST_DATABASE_URL }, async () => {
+    const url = new URL(process.env.SEED_CONTRACTS_TEST_DATABASE_URL);
+    assert(['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) && /^seed_573_test_\w+$/.test(url.searchParams.get('schema') ?? ''),
+        'Use um schema local vazio com prefixo seed_573_test_.');
+    const { PrismaClient } = await import('@prisma/client');
+    const prisma = new PrismaClient({ datasourceUrl: url.href });
+    try {
+        assert.equal(await prisma.user.count(), 0, 'O teste exige um schema vazio.');
+        const seed = () => {
+            const run = spawnSync(process.execPath, ['node_modules/prisma/build/index.js', 'db', 'seed', '--', '--contracts'], {
+                env: { ...process.env, DATABASE_URL: url.href }, encoding: 'utf8',
+            });
+            assert.equal(run.status, 0, run.stderr);
+        };
+        const startDay = day(0);
+        seed();
+        const read = () => prisma.reservation.findMany({
+            where: { id: { in: ['01', '02', '03', '04', '05'].map(suffix => `57300000-0000-4000-8000-0000000000${suffix}`) } },
+            orderBy: { id: 'asc' },
+            include: { tutor: { include: { user: true } }, pet: true, service: { include: { provider: true } }, transactions: { include: { financialEntries: true } } },
+        });
+        const first = await read();
+        seed();
+        const second = await read();
+        assert.equal(await prisma.reservation.count(), 6);
+        assert.deepEqual(second.map(row => row.id), first.map(row => row.id));
+        assert.deepEqual(second.map(row => row.status), ['requested', 'awaiting_payment', 'accepted', 'checked_in', 'completed']);
+        assert([startDay, day(0)].includes(second[2].startDate.toISOString().slice(0, 10)));
+        assert.equal(second[2].checkedInAt, null);
+        assert.ok(second[3].checkedInAt);
+        for (const [i, row] of second.entries()) {
+            assert.equal(row.tutor.user.profileStatus, 'complete');
+            assert.equal(row.pet.active, true);
+            assert.equal(row.service.provider.validationStatus, 'approved');
+            assert.equal(row.transactions.length, i < 2 ? 0 : 1);
+            if (i < 2) continue;
+            const [payment] = row.transactions;
+            assert.equal(payment.id, first[i].transactions[0].id);
+            assert.equal(payment.status, 'approved');
+            assert.equal(payment.gatewayPaymentId, null);
+            assert.equal(payment.financialEntries.length, 1);
+            assert.equal(payment.financialEntries[0].id, first[i].transactions[0].financialEntries[0].id);
+            assert.equal(payment.financialEntries[0].reservationId, row.id);
+            assert(payment.financialEntries[0].amount.equals(row.totalValue));
+        }
+    } finally {
+        await prisma.$disconnect();
+    }
+});
+
 test('seed #497/#498: criação, idempotência, HTTP, busca, agenda e rollback', { skip: !process.env.SEED_TEST_DATABASE_URL }, async t => {
     const url = new URL(process.env.SEED_TEST_DATABASE_URL);
     assert(['localhost', '127.0.0.1'].includes(url.hostname) && url.pathname.endsWith('_seed_test'), 'Use banco local descartável terminado em _seed_test.');
