@@ -588,15 +588,15 @@ O Tutor solicita hospedagem de um pet num serviço de um Host (Task #494, HSP-PB
 
 ## Solicitações recebidas pelo Host: `GET /api/v1/me/host/reservations`
 
-Lista das solicitações pendentes que o Host recebeu, para decidir (Task #485, HSP-PBI-041-TSK-01). A decisão de aceitar ou recusar é a #491.
+Lista as reservas recebidas pelo Host. A #485 cobre as solicitações pendentes, a #491 cobre a decisão e a #536 acrescenta a consulta de reservas confirmadas ou em andamento.
 
 **Autenticação:** igual ao `/me`. O Host vem só do `sub` do JWT (USER → `providers`); quem não tem linha em `providers` recebe `403 HOST_REQUIRED`. Vale para qualquer situação do Host (pendente, inativo), para ele seguir vendo o que já recebeu.
 
-**Parâmetros:** `status` (só `requested`, o padrão), `page` (a partir de 1, padrão 1) e `pageSize` (1 a 50, padrão 20).
+**Parâmetros:** `status` (`requested`, o padrão, `accepted` ou `checked_in`), `page` (a partir de 1, padrão 1) e `pageSize` (1 a 50, padrão 20).
 
 | Status | `code` | Caso |
 | --- | --- | --- |
-| `200` | — | `{ items, page, pageSize, total }`, da solicitação mais antiga para a mais nova; lista vazia quando não há pendentes |
+| `200` | — | `{ items, page, pageSize, total }`, da reserva mais antiga para a mais nova no estado selecionado |
 | `400` | `VALIDATION_ERROR` | `status`, `page` ou `pageSize` inválidos, todos em `details` |
 | `403` | `HOST_REQUIRED` | O usuário não é Host |
 | `401` / `404` | `TOKEN_INVALID` / `USER_NOT_FOUND` | Igual ao `/me` |
@@ -625,7 +625,22 @@ Lista das solicitações pendentes que o Host recebeu, para decidir (Task #485, 
 ```
 
 - **Isolamento:** o filtro é pelos serviços do próprio Host (`service.provider_id`), então um Host nunca vê solicitação de outro.
-- **LGPD:** do Tutor sai só o nome de exibição; CPF, telefone, e-mail e endereço não saem.
+- **LGPD:** antes do check-in, o Tutor aparece apenas com o nome. Com check-in registrado e a reserva em andamento, o Host responsável recebe também `checkedInAt`, `tutor.phone` e `tutor.address`. CPF, e-mail e coordenadas ficam fora da resposta.
+
+## Check-in do Host: `PATCH /api/v1/reservations/{id}/check-in`
+
+O Host responsável confirma a chegada do pet (#536). A rota não recebe body nem parâmetros de consulta. O pagamento aprovado deixa a reserva em `accepted`. A partir do dia de início em UTC, o check-in muda a reserva para `checked_in`, grava `checkedInAt` e registra `reservation_checked_in` para o Tutor em uma transação. A atualização condicional impede dois check-ins para a mesma reserva.
+
+| Status | `code` | Caso |
+| --- | --- | --- |
+| `200` | — | `{ id, status, checkedInAt }` |
+| `400` | `VALIDATION_ERROR` | Campos fora do contrato, listados em `details` |
+| `401` / `403` | `TOKEN_INVALID` / `HOST_REQUIRED` | Autenticação ou papel inválido |
+| `404` | `NOT_FOUND` / `USER_NOT_FOUND` | Reserva inexistente, de outro Host ou identificador inválido, ou usuário do token não encontrado |
+| `409` | `RESERVATION_NOT_CONFIRMED` | Reserva sem pagamento confirmado, já em andamento ou em outro estado |
+| `409` | `CHECK_IN_TOO_EARLY` | Data de início ainda não atingida |
+
+O app consulta `GET /api/v1/me/host/reservations?status=accepted` para encontrar reservas aptas ao check-in e `?status=checked_in` para acompanhar as que estão em andamento. A entrega da notificação ao Tutor segue o fluxo de notificações do projeto. Tolerância de janela, no-show e check-in tardio ficam fora da Sprint 8 conforme o PBI #213.
 
 ## Decisão do Host: `POST /api/v1/me/host/reservations/{id}/accept` e `/reject`
 
