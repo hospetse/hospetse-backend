@@ -1582,6 +1582,36 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  # Acompanhamento da contratação (#542): JWT do usuário → controller (só o Tutor da contratação).
+  /api/v1/contracts/{id}/timeline:
+    get:
+      tags: [Contratação]
+      operationId: getContractTimeline
+      summary: Linha do tempo do acompanhamento da contratação (#542)
+      description: |
+        O que aconteceu com o pet durante a contratação, em ordem cronológica crescente. Consultar não exige perfil apto, só ser o Tutor dela.
+        Hoje entram o check-in (#536) e os registros da hospedagem (`pet_activity_logs`). `check_out`, `start` e `end` entram com a #545 e a #570, sem mudar o contrato.
+        [assunção] `activity_type` igual a `medication` vira `medication`; o resto vira `routine`. Confirmar com a #539.
+      security:
+        - userJwt: []
+      parameters:
+        - { name: id, in: path, required: true, description: Id da contratação (reservation), schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Linha do tempo (lista vazia quando não há registros)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContractTimeline' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotTutor' }
+        '404':
+          description: '`NOT_FOUND`: contratação inexistente, de outro Tutor ou id inválido (mesma resposta, sem nenhum dado)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { code: NOT_FOUND, message: Contratação não encontrada }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   # Conversa da contratação (#548): JWT do usuário → controller. Abrir conversa não é contratar (fora da guarda de contratação).
   /api/v1/contracts/{id}/conversation:
     post:
@@ -2383,6 +2413,25 @@ components:
         startDate: { type: string, format: date }
         endDate: { type: [string, 'null'], format: date }
         totalValue: { type: number, description: Valor total da contratação (snapshot da solicitação), example: 240.1 }
+    ContractTimeline:
+      type: object
+      description: Linha do tempo do acompanhamento da contratação (#542)
+      required: [contractId, type, status, items]
+      properties:
+        contractId: { type: string, format: uuid }
+        type: { type: string, enum: [hospedagem, visita, passeio] }
+        status: { type: string, enum: [requested, awaiting_payment, accepted, checked_in, checked_out, completed, rejected, cancelled] }
+        items:
+          type: array
+          description: Ordem cronológica crescente (`at`, com desempate por id)
+          items:
+            type: object
+            required: [kind, at, description, photoUrl]
+            properties:
+              kind: { type: string, enum: [check_in, start, routine, medication, check_out, end] }
+              at: { type: string, format: date-time }
+              description: { type: [string, 'null'] }
+              photoUrl: { type: [string, 'null'], description: URL temporária da foto do registro }
     ContractPayment:
       type: object
       description: Resultado da tentativa de pagamento (#530). Nunca traz dado do cartão
