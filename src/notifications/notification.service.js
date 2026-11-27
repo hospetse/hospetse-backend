@@ -1,3 +1,5 @@
+import { prisma } from '../lib/prisma.js';
+
 // Notificações dos eventos da jornada (HSP-PBI-064-TSK-01 #554). O produtor chama o notify dentro da transação do próprio
 // evento: o evento e a notificação existem juntos ou nenhum. Quem lê é a lista do usuário (#555); push fica fora da Sprint 8.
 
@@ -34,4 +36,27 @@ export function notify(tx, { type, recipients, eventKey, reference, data }) {
         })),
         skipDuplicates: true,
     });
+}
+
+// Lista do usuário autenticado (HSP-PBI-064-TSK-02 #555): só as dele, da mais recente para a mais antiga.
+// Sai só o tipo e a referência para o App abrir a tela; o content fica no banco (LGPD) e a tela relacionada mostra o resto.
+export async function listMyNotificationsService(user, { page, pageSize }) {
+    const where = { userId: user.id };
+    const [notifications, total] = await prisma.$transaction([
+        prisma.notification.findMany({
+            where,
+            select: { id: true, type: true, referenceType: true, referenceId: true, read: true, createdAt: true },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            skip: (page - 1) * pageSize,
+            take: pageSize,
+        }),
+        prisma.notification.count({ where }),
+    ]);
+    return { items: notifications.map(toItem), page, pageSize, total };
+}
+
+function toItem({ id, type, referenceType, referenceId, read, createdAt }) {
+    // Linha antiga sem referência (tipo que o backfill da #554 não conhecia): o App mostra sem link
+    const reference = referenceType && referenceId ? { type: referenceType, id: referenceId } : null;
+    return { id, type, reference, read, createdAt: createdAt.toISOString() };
 }

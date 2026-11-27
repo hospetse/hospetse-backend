@@ -32,6 +32,7 @@ import { stripeWebhookController } from './payments/webhook.controller.js';
 import { getContractPaymentController, payContractController } from './payments/contract-payment.controller.js';
 import { listMessagesController, openConversationController } from './conversations/conversation.controller.js';
 import { listMyContractsController } from './contracts/my-contracts.controller.js';
+import { listMyNotificationsController } from './notifications/notification.controller.js';
 
 // Tempo máximo que /health/ready espera pela verificação do banco.
 export const READY_TIMEOUT_MS = 2000;
@@ -143,6 +144,9 @@ app.get('/api/v1/conversations/:id/messages', listMessagesController);
 
 // Minhas contratações (HSP-PBI-046-TSK-01 #533). Ordem: JWT do usuário → controller (só o Tutor, só as dele).
 app.get('/api/v1/me/contracts', listMyContractsController);
+
+// Notificações do usuário (HSP-PBI-064-TSK-02 #555). Ordem: JWT do usuário → controller (só as do próprio usuário).
+app.get('/api/v1/me/notifications', listMyNotificationsController);
 
 // Solicitações recebidas pelo Host (HSP-PBI-041-TSK-01 #485). Ordem: JWT do usuário → controller (exige ser Host).
 app.get('/api/v1/me/host/reservations', listHostReservationsController);
