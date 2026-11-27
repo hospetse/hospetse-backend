@@ -529,8 +529,15 @@ model Notification {
   content   String
   read      Boolean  @default(false)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  // Chave do evento (#554): o mesmo evento gera sempre a mesma chave, e o UNIQUE com o destinatário impede a duplicata.
+  // NULL só em linhas antigas que repetiam um evento (o backfill deixa a chave só na primeira)
+  eventKey      String?  @map("event_key") @db.VarChar(150)
+  // A tela que a notificação abre no App (#555): contract, conversation ou provider_validation
+  referenceType String?  @map("reference_type") @db.VarChar(30)
+  referenceId   String?  @map("reference_id") @db.Uuid
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, eventKey])
   @@index([userId, read, createdAt])
   @@map("notifications")
 }
