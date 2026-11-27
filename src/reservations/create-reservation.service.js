@@ -3,6 +3,7 @@ import { AppError } from '../lib/app-error.js';
 import { assertCanContract } from '../users/profile-policy.js';
 import { ELIGIBLE_HOST } from '../hosts/host-policy.js';
 import { assertNotBlocked, assertPetFree, assertVacancy } from './availability.js';
+import { notify } from '../notifications/notification.service.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -52,7 +53,7 @@ export async function createReservationService(user, tutor, data) {
     const [service, pet] = await Promise.all([
         prisma.service.findFirst({
             where: { id: data.serviceId, active: true, provider: ELIGIBLE_HOST },
-            select: { id: true, price: true, provider: { select: { id: true, acceptedSpecies: true, acceptedSizes: true, acceptedBreeds: true } } },
+            select: { id: true, price: true, provider: { select: { id: true, userId: true, acceptedSpecies: true, acceptedSizes: true, acceptedBreeds: true } } },
         }),
         // Só pet ativo do próprio Tutor: o de outro Tutor responde igual ao inexistente
         prisma.pet.findFirst({
@@ -95,6 +96,14 @@ export async function createReservationService(user, tutor, data) {
                     idempotencyKey: data.idempotencyKey,
                 },
                 select: RESERVATION_FIELDS,
+            });
+            // Nova solicitação para o Host (#554). O reenvio com a mesma Idempotency-Key sai antes, no replay, e não notifica de novo
+            await notify(tx, {
+                type: 'reservation_requested',
+                recipients: [service.provider.userId],
+                eventKey: `reservation_requested:${reservation.id}`,
+                reference: { type: 'contract', id: reservation.id },
+                data: { reservationId: reservation.id },
             });
             return { reservation, created: true };
         });

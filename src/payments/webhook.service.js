@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { recordPaymentEntry } from './financial-entries.service.js';
+import { notify } from '../notifications/notification.service.js';
 
 // Eventos do Stripe tratados na Sprint 8 e o status que levam à transação. Os outros são registrados e ignorados
 const HANDLED = { 'payment_intent.succeeded': 'approved', 'payment_intent.payment_failed': 'rejected' };
@@ -34,7 +35,7 @@ export function handlePaymentEventService(event) {
         });
         const transaction = await tx.paymentTransaction.findUnique({
             where: { id: found.id },
-            include: { reservation: { select: { tutorId: true, service: { select: { providerId: true, provider: { select: { userId: true } } } } } } },
+            include: { reservation: { select: { tutorId: true, tutor: { select: { userId: true } }, service: { select: { providerId: true, provider: { select: { userId: true } } } } } } },
         });
         if (transaction.status === 'pending') return 'pending';
 
@@ -42,7 +43,7 @@ export function handlePaymentEventService(event) {
         await recordPaymentEntry(tx, transaction);
         if (transaction.status !== 'approved') return 'rejected';
 
-        // 5. Confirma a contratação e avisa o prestador uma única vez: só quem tira a contratação de awaiting_payment notifica.
+        // 5. Confirma a contratação e avisa o prestador e o Tutor uma única vez: só quem tira a contratação de awaiting_payment notifica.
         // Contratação que já saiu de awaiting_payment (cancelada, por exemplo) fica como está, com o pagamento registrado
         // shortcut: pagamento aprovado de contratação que não aguarda mais pagamento não gera estorno; tratar com o estorno (HPET28)
         const { count: confirmed } = await tx.reservation.updateMany({
@@ -50,13 +51,14 @@ export function handlePaymentEventService(event) {
             data: { status: 'accepted' },
         });
         if (confirmed) {
-            await tx.notification.create({
-                data: {
-                    userId: transaction.reservation.service.provider.userId,
-                    type: 'payment_approved',
-                    // JSON para a entrega (FT-026) montar o texto e o link, no mesmo padrão de reservation_rejected
-                    content: JSON.stringify({ reservationId: transaction.reservationId, transactionId: transaction.id }),
-                },
+            await notify(tx, {
+                type: 'payment_approved',
+                // A mesma chave para os dois: o UNIQUE é por destinatário
+                recipients: [transaction.reservation.service.provider.userId, transaction.reservation.tutor.userId],
+                eventKey: `payment_approved:${transaction.id}`,
+                reference: { type: 'contract', id: transaction.reservationId },
+                // JSON para a entrega (FT-026) montar o texto e o link, no mesmo padrão de reservation_rejected
+                data: { reservationId: transaction.reservationId, transactionId: transaction.id },
             });
         }
         return 'approved';

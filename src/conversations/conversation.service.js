@@ -1,6 +1,7 @@
 import { AppError } from '../lib/app-error.js';
 import { prisma } from '../lib/prisma.js';
 import { isOpenForSending, participantRole } from './conversation-policy.js';
+import { notify } from '../notifications/notification.service.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Os dois lados da contratação: o Tutor (que solicitou) e o prestador do serviço
@@ -123,13 +124,13 @@ export async function sendMessageService(user, conversationId, text) {
             data: { conversationId: conversation.id, senderType: role, senderUserId: user.id, content: text.trim() },
             select: { id: true, sentAt: true, content: true },
         });
-        await tx.notification.create({
-            data: {
-                userId: role === 'tutor' ? hostUserId : tutorUserId,
-                type: 'new_message',
-                // Só as referências (LGPD): o texto da mensagem fica na conversa, não na notificação
-                content: JSON.stringify({ conversationId: conversation.id, reservationId: conversation.reservation.id, messageId: created.id }),
-            },
+        await notify(tx, {
+            type: 'new_message',
+            recipients: [role === 'tutor' ? hostUserId : tutorUserId],
+            eventKey: `new_message:${created.id}`,
+            reference: { type: 'conversation', id: conversation.id },
+            // Só as referências (LGPD): o texto da mensagem fica na conversa, não na notificação
+            data: { conversationId: conversation.id, reservationId: conversation.reservation.id, messageId: created.id },
         });
         return created;
     });

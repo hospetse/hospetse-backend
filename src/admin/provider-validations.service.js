@@ -1,5 +1,6 @@
 import { AppError } from '../lib/app-error.js';
 import { prisma } from '../lib/prisma.js';
+import { notify } from '../notifications/notification.service.js';
 
 // Fila de validação (#398): só cadastros pending, do envio mais antigo para o mais novo. Sem arquivo nenhum, só as contagens.
 export async function listPendingProvidersService({ providerType, page, pageSize }) {
@@ -50,19 +51,22 @@ function decide(admin, id, validationStatus, rejectionReason = null) {
         if (!provider) throw new AppError('Cadastro não encontrado', 404, 'NOT_FOUND');
 
         // Filtrar por pending deixa só uma de duas decisões simultâneas alterar a linha
+        const decidedAt = new Date();
         const { count } = await tx.provider.updateMany({
             where: { id, validationStatus: 'pending' },
-            data: { validationStatus, rejectionReason, validationDecidedAt: new Date(), validationDecidedById: admin.id },
+            data: { validationStatus, rejectionReason, validationDecidedAt: decidedAt, validationDecidedById: admin.id },
         });
         if (!count) throw new AppError('O cadastro já foi decidido', 409, 'PROVIDER_ALREADY_DECIDED');
 
-        await tx.notification.create({
-            data: {
-                userId: provider.userId,
-                type: `provider_validation_${validationStatus}`,
-                // JSON para a entrega (HSP-PBI-064) montar o texto
-                content: JSON.stringify({ providerId: id, rejectionReason }),
-            },
+        const type = `provider_validation_${validationStatus}`;
+        await notify(tx, {
+            type,
+            recipients: [provider.userId],
+            // A data da decisão entra na chave: um reenvio futuro depois da reprovação é outro evento, não uma repetição
+            eventKey: `${type}:${id}:${decidedAt.toISOString()}`,
+            reference: { type: 'provider_validation', id },
+            // JSON para a entrega (HSP-PBI-064) montar o texto
+            data: { providerId: id, rejectionReason },
         });
         return tx.provider.findUnique({ where: { id }, select: DECISION_FIELDS });
     });

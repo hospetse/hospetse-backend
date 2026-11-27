@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../lib/app-error.js';
 import { assertNotBlocked, assertPetFree, assertVacancy } from './availability.js';
+import { notify } from '../notifications/notification.service.js';
 
 const DECISION_FIELDS = { id: true, status: true, decidedAt: true, rejectionReason: true };
 
@@ -35,12 +36,12 @@ export function checkInHostReservationService(host, id) {
         });
         if (!count) throw notConfirmed;
 
-        await tx.notification.create({
-            data: {
-                userId: reservation.tutor.userId,
-                type: 'reservation_checked_in',
-                content: JSON.stringify({ reservationId: id }),
-            },
+        await notify(tx, {
+            type: 'reservation_checked_in',
+            recipients: [reservation.tutor.userId],
+            eventKey: `reservation_checked_in:${id}`,
+            reference: { type: 'contract', id },
+            data: { reservationId: id },
         });
         return { id, status, checkedInAt };
     });
@@ -72,7 +73,16 @@ export function acceptHostReservationService(host, id) {
         await tx.$queryRaw`SELECT id FROM pets WHERE id = ${reservation.petId}::uuid FOR UPDATE`;
         await assertPetFree(tx, reservation.petId, reservation.startDate, reservation.endDate);
 
-        return decide(tx, id, { status: 'awaiting_payment' });
+        const decided = await decide(tx, id, { status: 'awaiting_payment' });
+        // Aceite para o Tutor (#554): é o aviso de que já pode pagar
+        await notify(tx, {
+            type: 'reservation_accepted',
+            recipients: [reservation.tutor.userId],
+            eventKey: `reservation_accepted:${id}`,
+            reference: { type: 'contract', id },
+            data: { reservationId: id },
+        });
+        return decided;
     // Quem espera a trava do Host conta esse tempo no timeout; os 5 s padrão não cobrem dois aceites seguidos com a latência do Railway
     }, { timeout: 15000 });
 }
@@ -83,13 +93,13 @@ export function rejectHostReservationService(host, id, reason) {
     return prisma.$transaction(async (tx) => {
         const reservation = await findOwnReservation(tx, host.id, id);
         const decided = await decide(tx, id, { status: 'rejected', rejectionReason: reason });
-        await tx.notification.create({
-            data: {
-                userId: reservation.tutor.userId,
-                type: 'reservation_rejected',
-                // JSON para a entrega (FT-026) montar o texto e o link da solicitação
-                content: JSON.stringify({ reservationId: id, reason }),
-            },
+        await notify(tx, {
+            type: 'reservation_rejected',
+            recipients: [reservation.tutor.userId],
+            eventKey: `reservation_rejected:${id}`,
+            reference: { type: 'contract', id },
+            // [assunção] O motivo fica: o Tutor já o vê na solicitação. JSON para a entrega (FT-026) montar o texto e o link
+            data: { reservationId: id, reason },
         });
         return decided;
     });
