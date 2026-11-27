@@ -10,6 +10,7 @@ import WebSocket from 'ws';
 import { exportSPKI, generateKeyPair, SignJWT } from 'jose';
 import { prisma } from '../../src/lib/prisma.js';
 import { attachChat } from '../../src/conversations/chat-socket.js';
+import { failNotificationsFor } from './notification-failure.js';
 
 try {
     process.loadEnvFile();
@@ -244,8 +245,115 @@ test('pedido inválido recebe erro e o túnel continua aberto', async () => {
         assert.strictEqual(res.code, 'VALIDATION_ERROR', String(text));
         assert.deepStrictEqual(res.details, [{ field: 'text', message: 'texto de 1 a 2000 caracteres' }]);
     }
+    for (const clientId of ['', 'x'.repeat(101), 42, null]) {
+        const res = await anaWs.ask({ type: 'send', conversationId: conversation.id, text: 'oi', clientId });
+        assert.strictEqual(res.code, 'VALIDATION_ERROR', String(clientId));
+        assert.deepStrictEqual(res.details, [{ field: 'clientId', message: 'texto de 1 a 100 caracteres' }]);
+    }
     assert.strictEqual(anaWs.readyState, WebSocket.OPEN);
     assert.strictEqual(await prisma.message.count({ where: { conversationId: conversation.id } }), 0);
+});
+
+// Reenvio pelo App (achado da #557): sem a confirmação, o App manda o mesmo send de novo, com o mesmo clientId
+const newMessagesTo = (user, conversation) =>
+    prisma.notification.count({ where: { userId: user.id, type: 'new_message', referenceId: conversation.id } });
+
+test('reenvio com o mesmo clientId devolve a mesma mensagem só para o autor, sem duplicar mensagem nem notificação', async () => {
+    const ana = await newTutor('Ana');
+    const { conversation } = await newConversation(ana);
+    const anaWs = await connect(ana.token);
+    const hostWs = await connect(host.token);
+    await anaWs.ask({ type: 'join', conversationId: conversation.id });
+    await hostWs.ask({ type: 'join', conversationId: conversation.id });
+
+    const request = { type: 'send', conversationId: conversation.id, text: 'chego às 9h', clientId: 'tmp-retry' };
+    const first = await anaWs.ask(request);
+    assert.strictEqual((await hostWs.next()).message.id, first.message.id);
+    // O túnel caiu antes da confirmação chegar: o App reconecta e reenvia
+    const again = await connect(ana.token);
+    await again.ask({ type: 'join', conversationId: conversation.id });
+    const retry = await again.ask(request);
+    assert.deepStrictEqual(retry, first);
+
+    // O Host não recebe a mensagem de novo: o próximo evento dele é a mensagem seguinte
+    anaWs.send(JSON.stringify({ type: 'send', conversationId: conversation.id, text: 'até lá' }));
+    assert.strictEqual((await hostWs.next()).message.text, 'até lá');
+    assert.strictEqual(await prisma.message.count({ where: { conversationId: conversation.id } }), 2);
+    assert.strictEqual(await newMessagesTo(host.user, conversation), 2);
+});
+
+test('mesmo clientId enviado duas vezes ao mesmo tempo grava uma só mensagem', async () => {
+    const ana = await newTutor('Ana');
+    const { conversation } = await newConversation(ana);
+    const one = await connect(ana.token);
+    const two = await connect(ana.token);
+    await one.ask({ type: 'join', conversationId: conversation.id });
+    await two.ask({ type: 'join', conversationId: conversation.id });
+
+    const request = { type: 'send', conversationId: conversation.id, text: 'oi', clientId: 'tmp-race' };
+    one.send(JSON.stringify(request));
+    two.send(JSON.stringify(request));
+    // Cada túnel recebe a confirmação; quem ganhou também recebe pelo broadcast na sala
+    const ids = new Set();
+    for (const ws of [one, two]) ids.add((await ws.next()).message.id);
+    assert.strictEqual(ids.size, 1);
+    assert.strictEqual(await prisma.message.count({ where: { conversationId: conversation.id } }), 1);
+    assert.strictEqual(await newMessagesTo(host.user, conversation), 1);
+});
+
+test('clientId é por autor e por conversa; o mesmo clientId com outro texto dá 409 CLIENT_ID_REUSED', async () => {
+    const ana = await newTutor('Ana');
+    const { conversation } = await newConversation(ana);
+    const other = (await newConversation(ana)).conversation;
+    const anaWs = await connect(ana.token);
+    const hostWs = await connect(host.token);
+    for (const ws of [anaWs, hostWs]) await ws.ask({ type: 'join', conversationId: conversation.id });
+    await anaWs.ask({ type: 'join', conversationId: other.id });
+
+    const sent = await anaWs.ask({ type: 'send', conversationId: conversation.id, text: 'oi', clientId: 'tmp-1' });
+    await hostWs.next();
+    const reused = await anaWs.ask({ type: 'send', conversationId: conversation.id, text: 'outro texto', clientId: 'tmp-1' });
+    assert.strictEqual(reused.code, 'CLIENT_ID_REUSED');
+
+    // O Host com o mesmo clientId e outra conversa da Ana com ele: mensagens novas
+    const fromHost = await hostWs.ask({ type: 'send', conversationId: conversation.id, text: 'olá', clientId: 'tmp-1' });
+    await anaWs.next();
+    const elsewhere = await anaWs.ask({ type: 'send', conversationId: other.id, text: 'oi', clientId: 'tmp-1' });
+    assert.strictEqual(new Set([sent.message.id, fromHost.message.id, elsewhere.message.id]).size, 3);
+});
+
+test('reenvio depois de a contratação encerrar devolve a mensagem já gravada; mensagem nova continua bloqueada', async () => {
+    const ana = await newTutor('Ana');
+    const { reservation, conversation } = await newConversation(ana);
+    const anaWs = await connect(ana.token);
+    await anaWs.ask({ type: 'join', conversationId: conversation.id });
+    const request = { type: 'send', conversationId: conversation.id, text: 'obrigada!', clientId: 'tmp-last' };
+    const first = await anaWs.ask(request);
+
+    await prisma.reservation.update({ where: { id: reservation.id }, data: { status: 'completed' } });
+    assert.deepStrictEqual(await anaWs.ask(request), first);
+    assert.strictEqual((await anaWs.ask({ ...request, clientId: 'tmp-new' })).code, 'CONVERSATION_CLOSED');
+});
+
+test('falha ao gravar a notificação desfaz a mensagem; o reenvio do App grava uma só', async () => {
+    const ana = await newTutor('Ana');
+    const { conversation } = await newConversation(ana);
+    const anaWs = await connect(ana.token);
+    await anaWs.ask({ type: 'join', conversationId: conversation.id });
+    const request = { type: 'send', conversationId: conversation.id, text: 'tudo certo?', clientId: 'tmp-fail' };
+
+    const restore = await failNotificationsFor(host.user.id);
+    try {
+        const failed = await anaWs.ask(request);
+        assert.deepStrictEqual(failed, { type: 'error', request: 'send', code: 'INTERNAL_ERROR', message: 'Erro inesperado' });
+        assert.strictEqual(await prisma.message.count({ where: { conversationId: conversation.id } }), 0);
+    } finally {
+        await restore();
+    }
+
+    assert.strictEqual((await anaWs.ask(request)).type, 'message');
+    assert.strictEqual(await prisma.message.count({ where: { conversationId: conversation.id } }), 1);
+    assert.strictEqual(await newMessagesTo(host.user, conversation), 1);
 });
 
 test('o túnel fecha com 4001 quando o token vence', async () => {

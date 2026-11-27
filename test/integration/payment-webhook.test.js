@@ -12,6 +12,7 @@ import { FakePaymentGateway } from '../../src/payments/fake-payment-gateway.js';
 import { usePaymentGateway } from '../../src/payments/payment-gateway.js';
 import { createPaymentIntentService } from '../../src/payments/payment-intent.service.js';
 import { recordCorrectionService } from '../../src/payments/financial-entries.service.js';
+import { failNotificationsFor } from './notification-failure.js';
 
 try {
     process.loadEnvFile();
@@ -232,4 +233,48 @@ test('timeout, webhook aprova antes do reenvio, e o reenvio com a mesma chave n�
     assert.strictEqual(gateway.calls.filter((call) => call.idempotencyKey === pending.id).length, 1);
     assert.strictEqual((await entriesOf(pending.id)).length, 1);
     assert.strictEqual((await notificationsOf(reservation.id)).length, 1);
+});
+
+// Notificação do pagamento aprovado no reprocessamento e na falha (HSP-PBI-064, testes da #557)
+const approvalsOf = (reservationId) =>
+    prisma.notification.findMany({ where: { type: 'payment_approved', referenceId: reservationId }, orderBy: { userId: 'asc' } });
+
+test('Stripe reenvia o mesmo evento e manda outro do mesmo pagamento: uma notificação para o Host e uma para o Tutor', async () => {
+    const { reservation, transaction } = await newPayment();
+    const event = stripeEvent('payment_intent.succeeded', transaction);
+
+    assert.strictEqual((await sendWebhook(event)).status, 200);
+    assert.strictEqual((await sendWebhook(event)).status, 200);
+    assert.strictEqual((await sendWebhook(stripeEvent('payment_intent.succeeded', transaction))).status, 200);
+
+    const rows = await approvalsOf(reservation.id);
+    assert.deepStrictEqual(rows.map((row) => row.userId).sort(), [hostUser.id, tutorUser.id].sort());
+    for (const row of rows) {
+        assert.strictEqual(row.eventKey, `payment_approved:${transaction.id}`);
+        assert.strictEqual(row.referenceType, 'contract');
+    }
+});
+
+test('falha ao gravar a notificação desfaz o webhook inteiro; o Stripe reenvia o mesmo evento e tudo acontece uma vez', async () => {
+    const { reservation, transaction } = await newPayment();
+    const event = stripeEvent('payment_intent.succeeded', transaction);
+
+    const restore = await failNotificationsFor(tutorUser.id);
+    try {
+        // Resposta fora de 2xx: o Stripe tenta de novo mais tarde
+        assert.strictEqual((await sendWebhook(event)).status, 500);
+        // Nem o evento ficou registrado: senão o reenvio seria descartado como repetido
+        assert.strictEqual(await prisma.paymentEvent.count({ where: { id: event.id } }), 0);
+        assert.strictEqual((await prisma.paymentTransaction.findUnique({ where: { id: transaction.id } })).status, 'pending');
+        assert.strictEqual((await entriesOf(transaction.id)).length, 0);
+        assert.strictEqual((await prisma.reservation.findUnique({ where: { id: reservation.id } })).status, 'awaiting_payment');
+        assert.strictEqual((await approvalsOf(reservation.id)).length, 0);
+    } finally {
+        await restore();
+    }
+
+    assert.strictEqual((await sendWebhook(event)).status, 200);
+    assert.strictEqual((await prisma.reservation.findUnique({ where: { id: reservation.id } })).status, 'accepted');
+    assert.strictEqual((await entriesOf(transaction.id)).length, 1);
+    assert.strictEqual((await approvalsOf(reservation.id)).length, 2);
 });
