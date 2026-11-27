@@ -25,7 +25,9 @@ Todas em JSON, com o campo `type`.
 | `join` | `conversationId` | Entra na sala da conversa. Só os participantes (Tutor e prestador da contratação). |
 | `send` | `conversationId`, `text`, `clientId` (opcional) | Envia uma mensagem de texto (1 a 2.000 caracteres). Exige `join` antes. |
 
-`clientId` é um id gerado pelo App (até 100 caracteres) e volta na mensagem confirmada, para trocar o "enviando…" por ela.
+`clientId` é um id gerado pelo App (1 a 100 caracteres) e volta na mensagem confirmada, para trocar o "enviando…" por ela.
+Reenvio: se o App não recebeu a confirmação, manda o mesmo `send` com o mesmo `clientId`. O servidor devolve a mensagem já
+gravada (mesmo `message.id`) só para quem reenviou, sem gravar outra nem gerar outra notificação. Sem `clientId`, cada `send` é uma mensagem nova.
 A autoria vem só do túnel autenticado: qualquer campo de autor no JSON é ignorado.
 
 ## Mensagens do servidor para o App
@@ -44,7 +46,8 @@ Códigos de erro:
 | `UNKNOWN_TYPE` | `type` diferente de `join` e `send` |
 | `NOT_FOUND` | Conversa inexistente, id inválido ou de quem não participa (mesma resposta, sem dados) |
 | `NOT_JOINED` | `send` sem `join` antes |
-| `VALIDATION_ERROR` | `text` vazio ou com mais de 2.000 caracteres |
+| `VALIDATION_ERROR` | `text` vazio ou com mais de 2.000 caracteres, ou `clientId` que não é texto de 1 a 100 caracteres |
+| `CLIENT_ID_REUSED` | `clientId` já usado pelo mesmo autor nesta conversa com outro texto |
 | `CONVERSATION_CLOSED` | Contratação concluída, recusada ou cancelada: envio bloqueado |
 | `INTERNAL_ERROR` | Erro inesperado no servidor |
 

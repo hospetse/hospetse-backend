@@ -86,6 +86,7 @@ export async function listMessagesService(user, conversationId, { page, pageSize
 }
 
 const TEXT_MAX = 2000;
+const CLIENT_ID_MAX = 100;
 
 // Conversa com os dois lados e o papel do usuário (histórico e canal em tempo real). Quem não participa, inexistente
 // ou conversa sem contratação (legado, sem participantes por esta regra): o mesmo 404
@@ -107,11 +108,24 @@ export async function joinConversationService(user, conversationId) {
 // Envio de mensagem (HSP-PBI-056-TSK-01 #551): só texto, só participante, só com a contratação aberta.
 // A mensagem é gravada antes de ser entregue: o que aparece em tempo real sempre existe no histórico.
 // O autor vem do túnel autenticado (user), nunca do conteúdo da mensagem.
-export async function sendMessageService(user, conversationId, text) {
+// clientId (opcional) é o id que o App gerou: o reenvio com o mesmo clientId (o App não recebeu a confirmação) devolve a
+// mensagem já gravada, sem mensagem nem notificação novas (#557). Devolve { message, created }: created false no reenvio.
+export async function sendMessageService(user, conversationId, text, clientId) {
+    const details = [];
     if (typeof text !== 'string' || text.trim() === '' || text.trim().length > TEXT_MAX) {
-        throw new AppError('Parâmetros inválidos', 400, 'VALIDATION_ERROR', [{ field: 'text', message: `texto de 1 a ${TEXT_MAX} caracteres` }]);
+        details.push({ field: 'text', message: `texto de 1 a ${TEXT_MAX} caracteres` });
     }
+    if (clientId !== undefined && (typeof clientId !== 'string' || clientId === '' || clientId.length > CLIENT_ID_MAX)) {
+        details.push({ field: 'clientId', message: `texto de 1 a ${CLIENT_ID_MAX} caracteres` });
+    }
+    if (details.length) throw new AppError('Parâmetros inválidos', 400, 'VALIDATION_ERROR', details);
+
     const { conversation, role } = await findOwnConversation(user, conversationId);
+    const toMessage = (saved) => ({ id: saved.id, author: { role, name: user.name }, text: saved.content, sentAt: saved.sentAt });
+
+    const existing = await replayMessage(user, conversation.id, clientId, text.trim());
+    if (existing) return { message: toMessage(existing), created: false };
+
     // Conferido a cada envio: a contratação pode ter sido concluída ou cancelada depois de a pessoa entrar na sala
     if (!isOpenForSending(conversation.reservation.status)) {
         throw new AppError('A conversa desta contratação está encerrada', 409, 'CONVERSATION_CLOSED');
@@ -119,20 +133,41 @@ export async function sendMessageService(user, conversationId, text) {
 
     // Mensagem e evento de nova mensagem para o outro participante (HSP-PBI-064) na mesma transação: os dois existem ou nenhum
     const { tutorUserId, hostUserId } = parties(conversation.reservation);
-    const message = await prisma.$transaction(async (tx) => {
-        const created = await tx.message.create({
-            data: { conversationId: conversation.id, senderType: role, senderUserId: user.id, content: text.trim() },
-            select: { id: true, sentAt: true, content: true },
+    try {
+        const message = await prisma.$transaction(async (tx) => {
+            const created = await tx.message.create({
+                data: { conversationId: conversation.id, senderType: role, senderUserId: user.id, clientId, content: text.trim() },
+                select: MESSAGE_FIELDS,
+            });
+            await notify(tx, {
+                type: 'new_message',
+                recipients: [role === 'tutor' ? hostUserId : tutorUserId],
+                eventKey: `new_message:${created.id}`,
+                reference: { type: 'conversation', id: conversation.id },
+                // Só as referências (LGPD): o texto da mensagem fica na conversa, não na notificação
+                data: { conversationId: conversation.id, reservationId: conversation.reservation.id, messageId: created.id },
+            });
+            return created;
         });
-        await notify(tx, {
-            type: 'new_message',
-            recipients: [role === 'tutor' ? hostUserId : tutorUserId],
-            eventKey: `new_message:${created.id}`,
-            reference: { type: 'conversation', id: conversation.id },
-            // Só as referências (LGPD): o texto da mensagem fica na conversa, não na notificação
-            data: { conversationId: conversation.id, reservationId: conversation.reservation.id, messageId: created.id },
-        });
-        return created;
+        return { message: toMessage(message), created: true };
+    } catch (error) {
+        if (error.code !== 'P2002') throw error;
+        // O mesmo clientId chegou duas vezes ao mesmo tempo: o UNIQUE deixa uma só, e o segundo envio recebe a mesma mensagem
+        return { message: toMessage(await replayMessage(user, conversation.id, clientId, text.trim())), created: false };
+    }
+}
+
+const MESSAGE_FIELDS = { id: true, sentAt: true, content: true };
+
+// Reenvio do mesmo clientId pelo mesmo autor: a mensagem já gravada, ou 409 se o clientId veio com outro texto
+async function replayMessage(user, conversationId, clientId, text) {
+    if (clientId === undefined) return null;
+    const saved = await prisma.message.findUnique({
+        where: { conversationId_senderUserId_clientId: { conversationId, senderUserId: user.id, clientId } },
+        select: MESSAGE_FIELDS,
     });
-    return { id: message.id, author: { role, name: user.name }, text: message.content, sentAt: message.sentAt };
+    if (saved && saved.content !== text) {
+        throw new AppError('clientId já usado em outra mensagem', 409, 'CLIENT_ID_REUSED');
+    }
+    return saved;
 }

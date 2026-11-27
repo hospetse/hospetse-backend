@@ -10,7 +10,6 @@ const PATH = '/ws';
 const HEARTBEAT_MS = 30000;
 // Uma mensagem de texto do chat cabe com folga; acima disso o ws fecha a conexão (1009)
 const MAX_PAYLOAD_BYTES = 16 * 1024;
-const CLIENT_ID_MAX = 100;
 
 // Liga o canal ao servidor HTTP que o app.listen() devolveu. heartbeatMs só muda nos testes.
 export function attachChat(server, { heartbeatMs = HEARTBEAT_MS } = {}) {
@@ -88,10 +87,11 @@ export function attachChat(server, { heartbeatMs = HEARTBEAT_MS } = {}) {
                 if (!ws.rooms.has(request.conversationId)) {
                     throw new AppError('Entre na conversa (join) antes de enviar', 409, 'NOT_JOINED');
                 }
-                const message = await sendMessageService(ws.user, request.conversationId, request.text);
+                const { message, created } = await sendMessageService(ws.user, request.conversationId, request.text, request.clientId);
                 // clientId volta como veio: o App troca o "enviando…" pela mensagem confirmada
-                const clientId = typeof request.clientId === 'string' ? request.clientId.slice(0, CLIENT_ID_MAX) : undefined;
-                return broadcast(request.conversationId, { type: 'message', conversationId: request.conversationId, clientId, message });
+                const event = { type: 'message', conversationId: request.conversationId, clientId: request.clientId, message };
+                // Reenvio (#557): a confirmação vai só para o autor; o outro lado já recebeu essa mensagem
+                return created ? broadcast(request.conversationId, event) : send(ws, event);
             }
             throw new AppError('Tipo de mensagem desconhecido', 400, 'UNKNOWN_TYPE');
         } catch (error) {

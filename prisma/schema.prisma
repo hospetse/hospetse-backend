@@ -499,11 +499,14 @@ model Message {
   senderType     SenderType   @map("sender_type")
   // Quem enviou (#548). senderType diz o papel; mensagens antigas não têm
   senderUserId   String?      @map("sender_user_id") @db.Uuid
+  // Id gerado pelo App para a mensagem (#557): o reenvio com o mesmo clientId devolve a mensagem já gravada
+  clientId       String?      @map("client_id") @db.VarChar(100)
   content        String
   sentAt         DateTime     @default(now()) @map("sent_at") @db.Timestamptz(3)
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender         User?        @relation(fields: [senderUserId], references: [id])
 
+  @@unique([conversationId, senderUserId, clientId])
   @@index([conversationId, sentAt])
   @@index([conversationId, sentAt, id])
   @@index([senderUserId])
@@ -523,19 +526,19 @@ model ProviderFaq {
 }
 
 model Notification {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  type      String   @db.VarChar(100)
-  content   String
-  read      Boolean  @default(false)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  type          String   @db.VarChar(100)
+  content       String
+  read          Boolean  @default(false)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   // Chave do evento (#554): o mesmo evento gera sempre a mesma chave, e o UNIQUE com o destinatário impede a duplicata.
   // NULL só em linhas antigas que repetiam um evento (o backfill deixa a chave só na primeira)
   eventKey      String?  @map("event_key") @db.VarChar(150)
   // A tela que a notificação abre no App (#555): contract, conversation ou provider_validation
   referenceType String?  @map("reference_type") @db.VarChar(30)
   referenceId   String?  @map("reference_id") @db.Uuid
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, eventKey])
   @@index([userId, read, createdAt])
