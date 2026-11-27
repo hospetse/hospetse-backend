@@ -45,6 +45,8 @@ tags:
     description: Integração com o Stripe em modo de teste (ADR-016)
   - name: Conversa
     description: Conversa entre Tutor e prestador, uma por contratação (#548). O envio e a entrega das mensagens em tempo real são pelo WebSocket em /ws (#551), descrito em docs/websocket.md
+  - name: Notificação
+    description: Notificações dos eventos da jornada, gravadas pelos produtores (#554) e listadas para o usuário (#555). Push no celular fica fora da Sprint 8
 
 paths:
   /health:
@@ -1692,6 +1694,44 @@ paths:
         '403': { $ref: '#/components/responses/NotTutor' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  # Notificações do usuário (#555): JWT do usuário → controller (só as do próprio usuário).
+  /api/v1/me/notifications:
+    get:
+      tags: [Notificação]
+      operationId: listMyNotifications
+      summary: Lista as notificações do usuário (#555)
+      description: |
+        Só as do usuário autenticado (qualquer papel), da mais recente para a mais antiga (`createdAt`, com desempate por `id`).
+        O usuário vem só do JWT. Cada item traz o tipo e a referência para o App abrir a tela relacionada; o resto do conteúdo
+        fica nessa tela. Marcar como lida e push no celular ficam fora da Sprint 8.
+      security:
+        - userJwt: []
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        '200':
+          description: Uma página das notificações
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, pageSize, total]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Notification' } }
+                  page: { type: integer }
+                  pageSize: { type: integer }
+                  total: { type: integer }
+              example:
+                items:
+                  - { id: 6f1c2a0e-3b4d-4c5e-8f9a-0b1c2d3e4f5a, type: reservation_accepted, reference: { type: contract, id: 0d9e8f7a-6b5c-4d3e-2f1a-0b9c8d7e6f5a }, read: false, createdAt: '2026-11-27T14:30:00.000Z' }
+                page: 1
+                pageSize: 20
+                total: 1
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /api/v1/service-requests:
     post:
       tags: [Contratação]
@@ -2353,6 +2393,27 @@ components:
             tutor: { type: object, properties: { name: { type: string } } }
             host: { type: object, properties: { name: { type: string } } }
         open: { type: boolean, description: '`false` em contratação concluída, recusada ou cancelada: só leitura' }
+        createdAt: { type: string, format: date-time }
+    Notification:
+      type: object
+      description: Uma notificação na lista do usuário (#555)
+      required: [id, type, reference, read, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [reservation_requested, reservation_accepted, reservation_rejected, payment_approved, reservation_checked_in,
+                 reservation_checked_out, service_started, service_finished, provider_validation_approved,
+                 provider_validation_rejected, new_message]
+          description: Os tipos sem produtor ainda (reservation_checked_out, service_started e service_finished) entram com a #545 e a #570
+        reference:
+          type: [object, 'null']
+          description: A tela que a notificação abre. null só em notificação antiga de tipo que a #554 não conhecia
+          required: [type, id]
+          properties:
+            type: { type: string, enum: [contract, conversation, provider_validation] }
+            id: { type: string, format: uuid }
+        read: { type: boolean }
         createdAt: { type: string, format: date-time }
     ConversationMessage:
       type: object
