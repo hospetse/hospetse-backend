@@ -14,6 +14,44 @@ async function findOwnReservation(tx, hostId, id) {
     return reservation;
 }
 
+export function checkOutHostReservationService(host, id) {
+    return prisma.$transaction(async (tx) => {
+        const reservation = await tx.reservation.findFirst({
+            where: { id, service: { providerId: host.id } },
+            select: { status: true, tutorId: true, totalValue: true, platformFeeAmount: true, tutor: { select: { userId: true } } },
+        });
+        if (!reservation) throw new AppError('Solicitação não encontrada', 404, 'NOT_FOUND');
+        const notInProgress = new AppError('Apenas hospedagens em andamento podem receber check-out', 409, 'RESERVATION_NOT_IN_PROGRESS');
+        if (reservation.status !== 'checked_in') throw notInProgress;
+        if (reservation.platformFeeAmount === null) {
+            throw new AppError('A taxa da plataforma não foi registrada na solicitação', 409, 'PLATFORM_FEE_UNAVAILABLE');
+        }
+
+        const payment = await tx.paymentTransaction.findFirst({
+            where: { reservationId: id, type: 'payment', status: 'approved', value: reservation.totalValue },
+            select: { id: true },
+        });
+        if (!payment) throw new AppError('A hospedagem precisa de um pagamento aprovado pelo valor da contratação', 409, 'APPROVED_PAYMENT_REQUIRED');
+
+        const checkedOutAt = new Date();
+        const status = 'completed';
+        const { count } = await tx.reservation.updateMany({
+            where: { id, status: 'checked_in', service: { providerId: host.id } },
+            data: { status, checkedOutAt },
+        });
+        if (!count) throw notInProgress;
+
+        await tx.financialEntry.create({ data: {
+            transactionId: payment.id, reservationId: id, tutorId: reservation.tutorId, providerId: host.id,
+            type: 'host_net', amount: reservation.totalValue.minus(reservation.platformFeeAmount), status: 'approved',
+        } });
+        await tx.notification.create({ data: {
+            userId: reservation.tutor.userId, type: 'reservation_checked_out', content: JSON.stringify({ reservationId: id }),
+        } });
+        return { id, status, checkedOutAt };
+    });
+}
+
 const alreadyDecided = () => new AppError('A solicitação já foi decidida', 409, 'RESERVATION_ALREADY_DECIDED');
 
 export function checkInHostReservationService(host, id) {

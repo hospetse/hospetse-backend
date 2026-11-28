@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../lib/app-error.js';
 import { assertCanContract } from '../users/profile-policy.js';
@@ -73,6 +74,12 @@ export async function createReservationService(user, tutor, data) {
     if (details.length) throw new AppError('Payload inválido', 400, 'VALIDATION_ERROR', details);
 
     const nights = Math.round((data.endDate - data.startDate) / DAY_MS);
+    const totalValue = service.price.mul(nights);
+    const feePercent = process.env.RESERVATION_PLATFORM_FEE_PERCENT ?? '10';
+    if (!/^\d{1,3}(?:\.\d{1,2})?$/.test(feePercent) || Number(feePercent) > 100) {
+        throw new Error('RESERVATION_PLATFORM_FEE_PERCENT deve ser um percentual entre 0 e 100, com até duas casas decimais');
+    }
+    const platformFeeAmount = totalValue.mul(feePercent).div(100).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
 
     try {
         return await prisma.$transaction(async (tx) => {
@@ -88,9 +95,9 @@ export async function createReservationService(user, tutor, data) {
                     serviceId: service.id,
                     startDate: data.startDate,
                     endDate: data.endDate,
-                    // Snapshot: o preço do serviço pode mudar depois, a solicitação não
                     dailyPrice: service.price,
-                    totalValue: service.price.mul(nights),
+                    totalValue,
+                    platformFeeAmount,
                     notes: data.notes,
                     idempotencyKey: data.idempotencyKey,
                 },

@@ -284,12 +284,15 @@ model Reservation {
   rejectionReason  String?              @map("rejection_reason") @db.VarChar(500)
   decidedAt        DateTime?            @map("decided_at") @db.Timestamptz(3)
   checkedInAt      DateTime?            @map("checked_in_at") @db.Timestamptz(3)
+  checkedOutAt     DateTime?            @map("checked_out_at") @db.Timestamptz(3)
   startDate        DateTime             @map("start_date") @db.Timestamptz(3)
   endDate          DateTime?            @map("end_date") @db.Timestamptz(3)
   createdDate      DateTime             @default(now()) @map("created_date") @db.Timestamptz(3)
   totalValue       Decimal              @map("total_value") @db.Decimal(10, 2)
   // Snapshot da diária no momento da solicitação (#494): mudar o preço do serviço depois não altera a solicitação
   dailyPrice       Decimal?             @map("daily_price") @db.Decimal(10, 2)
+  // Valor da taxa em reais no momento da solicitação. Nulo quando esse dado não foi registrado.
+  platformFeeAmount Decimal?            @map("platform_fee_amount") @db.Decimal(10, 2)
   notes            String?              @db.VarChar(1000)
   // Header Idempotency-Key (#494): o reenvio da mesma intenção devolve a solicitação já criada
   idempotencyKey   String?              @map("idempotency_key") @db.VarChar(100)
@@ -421,7 +424,7 @@ model FinancialEntry {
   reservationId   String             @map("reservation_id") @db.Uuid
   tutorId         String             @map("tutor_id") @db.Uuid
   providerId      String             @map("provider_id") @db.Uuid
-  // payment ou correction
+  // payment, host_net ou correction
   type            String             @db.VarChar(20)
   amount          Decimal            @db.Decimal(10, 2)
   // approved ou rejected
