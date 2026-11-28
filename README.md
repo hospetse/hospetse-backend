@@ -576,7 +576,7 @@ O Tutor solicita hospedagem de um pet num serviço de um Host (Task #494, HSP-PB
 }
 ```
 
-- **Snapshot:** `dailyPrice` e `totalValue` são copiados do serviço no momento da solicitação. Se o Host mudar o preço depois, a solicitação não muda.
+- **Snapshot:** a solicitação grava a diária, o total (diária × noites) e o valor da taxa da plataforma. Alterações futuras no preço ou na taxa valem para novas solicitações. O valor da taxa é interno, e o Tutor continua pagando o `totalValue`.
 - **Pet aceito:** espécie, porte e raça do pet precisam estar nas listas do Host (`accepted_species`, `accepted_sizes`, `accepted_breeds`). Lista vazia = o Host não restringe.
 - **Idempotência:** a chave fica gravada com `UNIQUE (tutor_id, idempotency_key)`. Dois envios simultâneos com a mesma chave criam uma única solicitação.
 - A regra de contratação também é conferida no service (`assertCanContract`), e a gravação acontece numa transação junto com a checagem da agenda.
@@ -641,6 +641,29 @@ O Host responsável confirma a chegada do pet (#536). A rota não recebe body ne
 | `409` | `CHECK_IN_TOO_EARLY` | Data de início ainda não atingida |
 
 O app consulta `GET /api/v1/me/host/reservations?status=accepted` para encontrar reservas aptas ao check-in e `?status=checked_in` para acompanhar as que estão em andamento. A entrega da notificação ao Tutor segue o fluxo de notificações do projeto. Tolerância de janela, no-show e check-in tardio ficam fora da Sprint 8 conforme o PBI #213.
+
+## Check-out do Host: `PATCH /api/v1/reservations/{id}/check-out`
+
+Encerra uma hospedagem em andamento (#545). O Host vem do JWT e a reserva precisa pertencer a um serviço dele. A rota recebe o identificador na URL, sem body nem parâmetros de consulta.
+
+A transação muda a reserva de `checked_in` para `completed`, grava `checkedOutAt`, inclui um lançamento imutável `host_net` e registra `reservation_checked_out` para o Tutor. O líquido é o total da reserva menos a taxa em reais registrada na solicitação. Após a conclusão, a reserva sai da listagem em andamento e o telefone e o endereço do Tutor deixam de aparecer ao Host.
+
+| Status | Código | Caso |
+| --- | --- | --- |
+| `200` | — | Retorna `{ id, status: "completed", checkedOutAt }` |
+| `400` | `VALIDATION_ERROR` | Parâmetros fora do contrato |
+| `401` / `403` | `TOKEN_INVALID` / `HOST_REQUIRED` | Autenticação ou papel inválido |
+| `404` | `NOT_FOUND` / `USER_NOT_FOUND` | Reserva inexistente, inválida ou de outro Host, ou usuário do token não encontrado |
+| `409` | `RESERVATION_NOT_IN_PROGRESS` | Reserva fora de andamento ou check-out repetido |
+| `409` | `PLATFORM_FEE_UNAVAILABLE` | A taxa histórica não está registrada |
+| `409` | `APPROVED_PAYMENT_REQUIRED` | Não há pagamento aprovado pelo valor da reserva |
+| `500` | `INTERNAL_ERROR` | Falha inesperada. Se alguma gravação falhar, a transação inteira é revertida |
+
+`[provisório]` Na #545, Raul Jorge definiu 10% como taxa inicial por decisão arbitrária. Para alterar a taxa das novas solicitações de hospedagem, configure `RESERVATION_PLATFORM_FEE_PERCENT` no ambiente do back-end e reinicie o serviço. O padrão é 10%, e a configuração aceita valores de 0 a 100 com até duas casas decimais e ponto como separador (por exemplo, `12.5`). A taxa em reais é arredondada para centavos, com meio centavo arredondado para cima, e fica gravada na reserva para o cálculo do líquido no check-out.
+
+Reservas anteriores sem taxa registrada continuam retornando `409 PLATFORM_FEE_UNAVAILABLE`. O preenchimento retroativo depende de uma decisão sobre essas reservas (#545).
+
+Para executar o teste de integração do check-out, aplique as migrations em um schema PostgreSQL local vazio com prefixo `checkout_545_test_` e configure `CHECK_OUT_TEST_DATABASE_URL` apontando para ele. O teste cria lançamentos imutáveis. Use um schema descartável para cada rodada.
 
 ## Decisão do Host: `POST /api/v1/me/host/reservations/{id}/accept` e `/reject`
 

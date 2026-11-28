@@ -890,6 +890,42 @@ paths:
           description: Reserva não confirmada ou já registrada (RESERVATION_NOT_CONFIRMED), ou data de início ainda não atingida (CHECK_IN_TOO_EARLY).
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /api/v1/reservations/{id}/check-out:
+    patch:
+      tags: [Host]
+      operationId: checkOutHostReservation
+      summary: Conclui a hospedagem em andamento (#545)
+      description: O Host responsável encerra a hospedagem. Não recebe body nem parâmetros de consulta. Requer pagamento aprovado e o valor da taxa registrado na solicitação.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Hospedagem concluída, valor líquido registrado e notificação gravada.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status, checkedOutAt]
+                properties:
+                  id: { type: string, format: uuid }
+                  status: { type: string, const: completed }
+                  checkedOutAt: { type: string, format: date-time }
+        '400':
+          description: Parâmetros fora do contrato.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { $ref: '#/components/responses/NotHost' }
+        '404':
+          description: Reserva inexistente ou de outro Host.
+        '409':
+          description: Reserva fora de andamento (RESERVATION_NOT_IN_PROGRESS), sem taxa histórica (PLATFORM_FEE_UNAVAILABLE) ou sem pagamento aprovado (APPROVED_PAYMENT_REQUIRED).
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /api/v1/me/host/reservations/{id}/accept:
     post:
       tags: [Host]
@@ -1357,6 +1393,7 @@ paths:
       summary: Solicita hospedagem de um pet num serviço de um Host (#494)
       description: |
         Cria a solicitação no estado `requested` (pendente, HSP-DEC-004), com o snapshot da diária e do total (diária × noites).
+        O servidor também guarda o valor da taxa da plataforma para calcular o líquido no check-out. O total cobrado do Tutor continua sendo `totalValue`.
         O Tutor vem só do `sub` do JWT. O pet precisa ser ativo, do próprio Tutor e aceito pelo Host (espécie, porte e raça;
         lista vazia no Host = aceita tudo). O serviço precisa estar ativo e ser de um Host elegível (o mesmo filtro do `GET /hosts/{id}`).
         Reenviar com a mesma `Idempotency-Key` devolve a mesma solicitação (`200`), sem criar outra.
