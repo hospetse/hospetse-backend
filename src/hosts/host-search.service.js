@@ -14,7 +14,7 @@ export function findTutorPet(tutorId, petId) {
 
 // Mesma regra do accepts() da solicitação (#494), em SQL: lista vazia aceita tudo; sem diferenciar maiúsculas.
 // value null = o pet não tem o dado: só Host que não restringe aceita.
-function acceptsSql(column, value) {
+export function acceptsSql(column, value) {
     if (value === null) return Prisma.sql`cardinality(${column}) = 0`;
     return Prisma.sql`(cardinality(${column}) = 0 OR EXISTS (SELECT 1 FROM unnest(${column}) AS v WHERE lower(v) = lower(${value})))`;
 }

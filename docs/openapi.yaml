@@ -1122,6 +1122,79 @@ paths:
         '409': { description: '`PROVIDER_ALREADY_SUBMITTED` ou `FILE_LIMIT_REACHED`' }
         '503': { $ref: '#/components/responses/StorageUnavailable' }
 
+  /api/v1/me/provider/availability:
+    get:
+      tags: [Provider]
+      operationId: getCareProviderAvailability
+      summary: Consulta área, horários e preço do próprio Sitter ou Walker (#561)
+      description: |
+        Só o prestador aprovado consulta. Sem `date`, `busyIntervals` é vazio; com `date`, inclui horários de contratações
+        aguardando pagamento, confirmadas ou em andamento naquele dia. Horários são locais de America/Sao_Paulo.
+      parameters:
+        - { name: date, in: query, schema: { type: string, format: date }, description: Dia para consultar horários ocupados }
+      responses:
+        '200': { description: Configuração e intervalos ocupados, content: { application/json: { schema: { $ref: '#/components/schemas/CareAvailability' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { description: Prestador ainda não aprovado ou inativo }
+        '404': { description: Cadastro de Sitter ou Walker inexistente }
+        '500': { $ref: '#/components/responses/InternalError' }
+    put:
+      tags: [Provider]
+      operationId: saveCareProviderAvailability
+      summary: Substitui área, horários e preço do próprio Sitter ou Walker (#561)
+      description: |
+        Só o prestador aprovado configura. Uma cidade e bairros dessa cidade; `serviceNeighborhoods: []` atende a cidade inteira.
+        [assunção #561] O raio salvo no cadastro não filtra a busca enquanto os endereços não tiverem coordenadas.
+        Horários semanais não podem se sobrepor. O preço é por visita para Sitter e por passeio para Walker.
+        `durationWalkMinutes` é obrigatório apenas para Walker. Se qualquer campo for inválido, nada é alterado.
+        A mudança vale para buscas e solicitações novas; valores já registrados nas contratações não mudam.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CareAvailabilityInput' }
+      responses:
+        '200': { description: Configuração salva, content: { application/json: { schema: { $ref: '#/components/schemas/CareAvailability' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '403': { description: Prestador ainda não aprovado ou inativo }
+        '404': { description: Cadastro de Sitter ou Walker inexistente }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/providers/search:
+    get:
+      tags: [Provider]
+      operationId: searchCareProviders
+      summary: Busca visitas e passeios disponíveis (#561)
+      description: |
+        Retorna apenas Sitter ou Walker ativo, aprovado e configurado, por menor preço e depois `serviceId`.
+        A cidade e o bairro devem coincidir com a área configurada; lista de bairros vazia cobre a cidade inteira.
+        Quando `date`, `startTime` e `endTime` são informados, o intervalo deve caber em um horário semanal e não cruzar
+        uma contratação aguardando pagamento, confirmada ou em andamento. [assunção #561] Horários em America/Sao_Paulo.
+        A criação da solicitação de visita/passeio e a revalidação da disponibilidade pertencem à #564.
+      parameters:
+        - { name: providerType, in: query, required: true, schema: { type: string, enum: [pet_sitter, pet_walker] } }
+        - { name: city, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 100 } }
+        - { name: neighborhood, in: query, schema: { type: string, minLength: 1, maxLength: 100 } }
+        - { name: date, in: query, schema: { type: string, format: date } }
+        - { name: startTime, in: query, schema: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' } }
+        - { name: endTime, in: query, schema: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' } }
+        - { name: minPrice, in: query, schema: { type: number, minimum: 0 } }
+        - { name: maxPrice, in: query, schema: { type: number, minimum: 0 } }
+        - { name: petId, in: query, schema: { type: string, format: uuid }, description: 'Pet ativo do próprio Tutor; incompatível com species, size ou breed' }
+        - { name: species, in: query, schema: { type: string, enum: [dog, cat] }, description: 'Espécie manual sem petId' }
+        - { name: size, in: query, schema: { type: string, enum: [small, medium, large] }, description: 'Porte manual sem petId' }
+        - { name: breed, in: query, schema: { type: string, minLength: 1, maxLength: 100 }, description: 'Raça manual sem petId' }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        '200': { description: Prestadores compatíveis, content: { application/json: { schema: { $ref: '#/components/schemas/CareSearchResult' } } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/TokenInvalid' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   # Cadastro do Host (#325): JWT do usuário → (JSON no PUT) → controller. O dono vem só do JWT.
   /api/v1/me/host:
     put:
@@ -1955,6 +2028,67 @@ components:
         acceptedBreeds: { type: array, items: { type: string } }
         documents: { type: array, items: { $ref: '#/components/schemas/HostDocument' } }
         photos: { type: array, items: { $ref: '#/components/schemas/HostPhoto' } }
+
+    CareWorkingHour:
+      type: object
+      additionalProperties: false
+      required: [dayOfWeek, startTime, endTime]
+      properties:
+        dayOfWeek: { type: integer, minimum: 0, maximum: 6, description: '0 = domingo' }
+        startTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+        endTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+
+    CareAvailabilityInput:
+      type: object
+      additionalProperties: false
+      required: [serviceCity, serviceNeighborhoods, workingHours, price]
+      properties:
+        serviceCity: { type: string, minLength: 1, maxLength: 100 }
+        serviceNeighborhoods: { type: array, uniqueItems: true, items: { type: string, minLength: 1, maxLength: 100 }, description: 'Vazia = cidade inteira' }
+        workingHours: { type: array, minItems: 1, items: { $ref: '#/components/schemas/CareWorkingHour' } }
+        price: { type: number, exclusiveMinimum: 0, maximum: 99999999.99, description: 'Por visita (Sitter) ou passeio (Walker), em reais' }
+        durationWalkMinutes: { type: integer, minimum: 1, maximum: 1440, description: 'Obrigatório para Walker; proibido para Sitter' }
+
+    CareAvailability:
+      type: object
+      required: [providerType, serviceCity, serviceNeighborhoods, workingHours, price, durationWalkMinutes, busyIntervals]
+      properties:
+        providerType: { type: string, enum: [pet_sitter, pet_walker] }
+        serviceCity: { type: [string, 'null'], description: 'Null antes da primeira configuração' }
+        serviceNeighborhoods: { type: array, items: { type: string } }
+        workingHours: { type: array, items: { $ref: '#/components/schemas/CareWorkingHour' } }
+        price: { type: [number, 'null'] }
+        durationWalkMinutes: { type: [integer, 'null'] }
+        busyIntervals:
+          type: array
+          items:
+            type: object
+            required: [startTime, endTime]
+            properties:
+              startTime: { type: string, example: '09:00' }
+              endTime: { type: string, example: '10:00' }
+
+    CareSearchResult:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [providerId, serviceId, providerType, name, price, serviceCity, serviceNeighborhoods, durationWalkMinutes]
+            properties:
+              providerId: { type: string, format: uuid }
+              serviceId: { type: string, format: uuid }
+              providerType: { type: string, enum: [pet_sitter, pet_walker] }
+              name: { type: string }
+              price: { type: number }
+              serviceCity: { type: string }
+              serviceNeighborhoods: { type: array, items: { type: string } }
+              durationWalkMinutes: { type: [integer, 'null'] }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
 
     ProviderValidationDecision:
       type: object
