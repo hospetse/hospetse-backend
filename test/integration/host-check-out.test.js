@@ -43,7 +43,12 @@ test('check-out usa a taxa da solicitação, conclui uma vez e reverte falha de 
     const owner = await host();
     const other = await host();
     const tutorUser = await user({ status: 'active', profileStatus: 'complete' });
-    const tutor = await prisma.tutor.create({ data: { userId: tutorUser.id, name: 'Tutor teste', phone: '11900000001' } });
+    const address = { zipCode: '87000000', street: 'Rua de Teste', number: '12', complement: null, neighborhood: 'Centro', city: 'Maringá', state: 'PR' };
+    const tutor = await prisma.tutor.create({
+        data: {
+            user: { connect: { id: tutorUser.id } }, name: 'Tutor teste', phone: '11900000001', address: { create: address },
+        },
+    });
     const pet = await prisma.pet.create({ data: { tutorId: tutor.id, petName: 'Pet teste', petSpecies: 'dog' } });
     async function fixture(platformFeeAmount, paid = true) {
         const row = await prisma.reservation.create({ data: {
@@ -59,7 +64,7 @@ test('check-out usa a taxa da solicitação, conclui uma vez e reverte falha de 
     const checkOut = (id, host = owner) => fetch(base + `/api/v1/reservations/${id}/check-out`, { method: 'PATCH', headers: host.headers });
     const list = async () => (await fetch(base + '/api/v1/me/host/reservations?status=checked_in', { headers: owner.headers })).json();
     const entries = (id) => prisma.financialEntry.findMany({ where: { reservationId: id, type: 'host_net' } });
-    const notices = () => prisma.notification.count({ where: { userId: tutorUser.id, type: 'reservation_checked_out' } });
+    const notices = () => prisma.notification.findMany({ where: { userId: tutorUser.id, type: 'reservation_checked_out' } });
 
     const tutorHeaders = await authHeaders(tutorUser);
     const day = (offset) => new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10);
@@ -74,7 +79,6 @@ test('check-out usa a taxa da solicitação, conclui uma vez e reverte falha de 
     assert.equal(first.status, 201);
     const { id, totalValue } = await first.json();
     assert.equal(totalValue, 123.45);
-    assert.equal((await checkOut(id)).status, 409);
 
     process.env.RESERVATION_PLATFORM_FEE_PERCENT = '101';
     assert.equal((await requestReservation(2)).status, 500);
@@ -94,20 +98,45 @@ test('check-out usa a taxa da solicitação, conclui uma vez e reverte falha de 
         data: { status: 'accepted', transactions: { create: { type: 'payment', status: 'approved', value: totalValue } } },
     });
     assert.equal(row.platformFeeAmount.toFixed(2), '12.35');
+
+    await t.test('reserva aceita e paga, mas sem check-in, permanece aceita sem lançar o líquido', async () => {
+        const response = await checkOut(id);
+        assert.equal(response.status, 409);
+        assert.equal((await response.json()).code, 'RESERVATION_NOT_IN_PROGRESS');
+        const stored = await prisma.reservation.findUniqueOrThrow({ where: { id } });
+        assert.equal(stored.status, 'accepted');
+        assert.equal(stored.checkedOutAt, null);
+        assert.deepEqual(await entries(id), []);
+        assert.deepEqual(await notices(), []);
+    });
+
     const checkIn = await fetch(base + `/api/v1/reservations/${id}/check-in`, { method: 'PATCH', headers: owner.headers });
     assert.equal(checkIn.status, 200);
-    assert.equal((await list()).items[0].tutor.phone, tutor.phone);
+    const { items } = await list();
+    assert.deepEqual(items[0].tutor, { name: tutor.name, phone: tutor.phone, address });
     assert.equal((await checkOut(row.id, other)).status, 404);
+    const startedAt = Date.now();
     const attempts = await Promise.all([checkOut(row.id), checkOut(row.id)]);
     assert.deepEqual(attempts.map(res => res.status).sort(), [200, 409]);
-    const { checkedOutAt, status } = await attempts.find(res => res.ok).json();
-    assert.equal(status, 'completed');
-    assert.equal((await prisma.reservation.findUniqueOrThrow({ where: { id: row.id } })).checkedOutAt.toISOString(), checkedOutAt);
+    const result = await attempts.find(res => res.ok).json();
+    assert.ok(Date.parse(result.checkedOutAt) >= startedAt && Date.parse(result.checkedOutAt) <= Date.now());
+    assert.equal((await attempts.find(res => res.status === 409).json()).code, 'RESERVATION_NOT_IN_PROGRESS');
+
+    await t.test('check-out repetido mantém a data e os efeitos da conclusão original', async () => {
+        const retry = await checkOut(id);
+        assert.equal(retry.status, 409);
+        assert.equal((await retry.json()).code, 'RESERVATION_NOT_IN_PROGRESS');
+        const stored = await prisma.reservation.findUniqueOrThrow({ where: { id } });
+        assert.equal(stored.status, 'completed');
+        assert.deepEqual(result, { id, status: 'completed', checkedOutAt: stored.checkedOutAt.toISOString() });
+        const ledger = await entries(id);
+        assert.equal(ledger.length, 1);
+        assert.equal(ledger[0].amount.toFixed(2), '111.10');
+        assert.equal(ledger[0].providerId, owner.provider.id);
+        assert.equal(ledger[0].tutorId, tutor.id);
+        assert.deepEqual((await notices()).map(({ content }) => JSON.parse(content)), [{ reservationId: id }]);
+    });
     assert.equal((await list()).items.length, 0);
-    const ledger = await entries(row.id);
-    assert.equal(ledger.length, 1);
-    assert.equal(ledger[0].amount.toFixed(2), '111.10');
-    assert.equal(await notices(), 1);
 
     for (const [fee, paid, code] of [[null, true, 'PLATFORM_FEE_UNAVAILABLE'], [0, false, 'APPROVED_PAYMENT_REQUIRED']]) {
         const { row: blocked } = await fixture(fee, paid);
@@ -128,5 +157,5 @@ test('check-out usa a taxa da solicitação, conclui uma vez e reverte falha de 
     assert.equal(unchanged.status, 'checked_in');
     assert.equal(unchanged.checkedOutAt, null);
     assert.equal((await entries(conflicting.id)).length, 1);
-    assert.equal(await notices(), 1);
+    assert.deepEqual((await notices()).map(({ content }) => JSON.parse(content)), [{ reservationId: id }]);
 });
