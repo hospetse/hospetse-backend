@@ -39,9 +39,12 @@ stages:
           - script: npm test
             displayName: Testes sem banco
           - script: |
+              set -e
               # Os testes geram as próprias chaves do JWT; só o banco vem de fora
               export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/backend_test"
               npx prisma migrate deploy
+              export CHECK_OUT_TEST_DATABASE_URL="${DATABASE_URL}?schema=checkout_545_test_ci"
+              DATABASE_URL="$CHECK_OUT_TEST_DATABASE_URL" npx prisma migrate deploy
               npm run test:integration
             displayName: Migrations e testes de integração
 
